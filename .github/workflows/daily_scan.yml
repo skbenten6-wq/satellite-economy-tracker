@@ -28,6 +28,10 @@ jobs:
         run: |
           pip install earthengine-api geemap matplotlib pillow google-auth requests GoogleNews fpdf
 
+      - name: Install Libraries
+        run: |
+          pip install earthengine-api geemap matplotlib pillow google-auth requests GoogleNews fpdf yfinance
+
       - name: Run Intelligence Script
         env:
           EE_KEY: ${{ secrets.EE_KEY }}

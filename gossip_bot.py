@@ -1,5 +1,6 @@
 import os
 import requests
+import urllib.parse
 import google.generativeai as genai
 from GoogleNews import GoogleNews
 from datetime import datetime
@@ -29,15 +30,18 @@ if GEMINI_KEY:
     except: pass
 
 def clean_google_link(link):
-    """Fixes the broken '404' links from Google News."""
+    """
+    Attempts to fix the broken relative links.
+    Google often gives './articles/...' which needs the base URL.
+    """
     if not link: return "https://news.google.com"
     
-    # Google often returns links starting with "./"
+    # Case 1: Relative path starting with ./
     if link.startswith("./"):
         return f"https://news.google.com{link[1:]}"
     
-    # Sometimes it returns just "articles/..."
-    if link.startswith("articles/"):
+    # Case 2: Just 'articles/...' or 'rss/articles/...'
+    if link.startswith("articles/") or link.startswith("rss/"):
         return f"https://news.google.com/{link}"
         
     return link
@@ -74,7 +78,7 @@ def send_telegram(msg):
 def hunt_for_gossip():
     print(f"🕵️‍♂️ Gossip Hunter Active... [{datetime.now().strftime('%H:%M')}]")
     
-    # Look back 4 hours to catch fresh rumors
+    # Look back 4 hours
     googlenews = GoogleNews(period='4h') 
     googlenews.set_lang('en')
     googlenews.set_encode('utf-8')
@@ -91,8 +95,12 @@ def hunt_for_gossip():
             title = item.get('title', '')
             raw_link = item.get('link', '')
             
-            # --- FIX 1: CLEAN THE LINK ---
+            # --- FIX 1: BETTER CLEANER ---
             link = clean_google_link(raw_link)
+            
+            # --- FIX 2: FALLBACK SEARCH LINK ---
+            # This generates a Google Search URL for the title. It 100% works.
+            safe_search_url = f"https://www.google.com/search?q={urllib.parse.quote(title)}"
             
             # FILTER: Must contain a Rumor Keyword
             is_gossip = any(k.lower() in title.lower() for k in RUMOR_KEYWORDS)
@@ -102,14 +110,13 @@ def hunt_for_gossip():
                 
                 print(f"👀 Spot: {title}")
                 
-                # --- FIX 2: AI ANALYSIS WITH GEMINI 3 ---
                 ai_take = get_ai_opinion(title)
                 
                 msg = (
                     f"🤫 <b>GOSSIP DETECTED</b> | {target}\n\n"
                     f"🗣️ <i>{title}</i>\n\n"
                     f"🔮 <b>AI READ:</b>\n<pre>{ai_take}</pre>\n\n"
-                    f"🔗 <a href='{link}'>Read Source</a>"
+                    f"🔗 <a href='{link}'>Direct Link</a> | <a href='{safe_search_url}'>🔎 Google Search</a>"
                 )
                 
                 send_telegram(msg)

@@ -96,17 +96,19 @@ def get_image(token, target_config):
     response = requests.post(api_url, json=payload, headers=headers)
     return Image.open(BytesIO(response.content)) if response.status_code == 200 else None
 
+# ... (Previous code remains the same) ...
+
 # --- 4. EXECUTE DASHBOARD (2x2 GRID) ---
 token = get_token(CLIENT_ID, CLIENT_SECRET)
 
 if token:
-    plt.figure(figsize=(12, 12)) # Square Layout for 2x2
+    plt.figure(figsize=(12, 12)) 
     
     for i, (name, config) in enumerate(TARGETS.items()):
         print(f"Scanning {name}...")
         img = get_image(token, config)
         
-        plt.subplot(2, 2, i+1) # 2 Rows, 2 Columns
+        plt.subplot(2, 2, i+1)
         if img:
             plt.imshow(img)
             plt.title(f"{name}", fontsize=10, fontweight='bold')
@@ -118,7 +120,9 @@ if token:
             plt.title(name)
             
     plt.tight_layout()
-    plt.show()
-    print("✅ 4-SECTOR SCAN COMPLETE")
+    
+    # CHANGE: Save to file instead of just showing
+    plt.savefig("dashboard.png") 
+    print("✅ Dashboard saved as dashboard.png")
 else:
     print("❌ Auth Failed")

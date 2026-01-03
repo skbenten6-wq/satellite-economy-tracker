@@ -1,6 +1,7 @@
 import requests
 import os
 import json
+import google.generativeai as genai
 from datetime import datetime, timedelta
 
 # --- CONFIGURATION ---
@@ -17,13 +18,37 @@ HEADERS = {
 # SECRETS
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY") # New Secret
 
-# KEYWORDS
+# Configure AI
+if GEMINI_KEY:
+    genai.configure(api_key=GEMINI_KEY)
+    model = genai.GenerativeModel('gemini-1.5-flash')
+
 WATCHLIST = [
     "Resignation", "Appointment", "Dividend", "Bonus", 
     "Order", "Awarded", "Buyback", "Acquisition", "Merger",
-    "Press Release", "Earnings", "Result"
+    "Press Release", "Earnings", "Result", "Preferential"
 ]
+
+def analyze_news_with_ai(symbol, category, headline):
+    """Asks Gemini to analyze the news impact."""
+    if not GEMINI_KEY: return "AI Analysis Unavailable"
+    
+    prompt = (
+        f"Act as a hedge fund analyst. Analyze this news for Indian stock '{symbol}':\n"
+        f"Category: {category}\n"
+        f"Headline: {headline}\n\n"
+        "Output format:\n"
+        "IMPACT: [BULLISH/BEARISH/NEUTRAL]\n"
+        "REASON: [One short sentence explaining why]"
+    )
+    
+    try:
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except:
+        return "⚠️ AI Analysis Failed"
 
 def send_telegram_alert(msg):
     if not BOT_TOKEN or not CHAT_ID: return
@@ -48,7 +73,7 @@ def get_nse_data():
         return []
 
 def check_for_fresh_news():
-    print(f"🚀 Scanning NSE (V4.0 Safety Net)... [{datetime.now().strftime('%H:%M:%S')}]")
+    print(f"🚀 Scanning NSE (V5.0 AI Analyst)... [{datetime.now().strftime('%H:%M:%S')}]")
     data = get_nse_data()
     
     now = datetime.now()
@@ -66,40 +91,38 @@ def check_for_fresh_news():
             symbol = item.get('symbol')
             category = item.get('desc') 
             
-            # --- FIX 1: HEADLINE (Keep what works) ---
-            raw_headline = (
-                item.get('caption') or 
-                item.get('subject') or 
-                item.get('remarks') or 
-                category
-            )
+            raw_headline = (item.get('caption') or item.get('subject') or item.get('remarks') or category)
             headline = raw_headline.strip() if raw_headline else "Details N/A"
             
-            # --- FIX 2: THE SAFETY NET LINKS ---
+            # --- LINK LOGIC ---
             attachment = item.get('attchmntText')
-            
-            # Try to detect SME (Small Enterprise)
-            # SME symbols are often different or have specific series, 
-            # but if we can't be sure, we default to CORP.
-            # If this link fails, the user hits "View on NSE"
             if item.get('series') in ['SM', 'ST', 'SME', 'SY']:
                 pdf_link = f"{URL_SME}{attachment}"
             else:
                 pdf_link = f"{URL_CORP}{attachment}"
-                
-            # THE GUARANTEED LINK (Company Quote Page)
-            # This page always exists and lists recent announcements
             safe_link = f"https://www.nseindia.com/get-quotes/equity?symbol={symbol}"
 
-            # Filter Logic
             full_text = f"{category} {headline}"
             
             if any(k.lower() in full_text.lower() for k in WATCHLIST):
                 
+                # --- AI ANALYSIS STEP ---
+                print(f"🧠 Analyzing {symbol}...")
+                ai_insight = analyze_news_with_ai(symbol, category, headline)
+                
+                # Formatting the Insight
+                if "BULLISH" in ai_insight.upper():
+                    icon = "🟢"
+                elif "BEARISH" in ai_insight.upper():
+                    icon = "🔴"
+                else:
+                    icon = "⚪"
+
                 alert_msg = (
                     f"<b>🚨 {symbol}</b> | {category}\n\n"
                     f"📰 <b>{headline}</b>\n\n"
-                    f"🔗 <a href='{pdf_link}'>Try PDF</a> | <a href='{safe_link}'>View on NSE (Guaranteed)</a>\n"
+                    f"{icon} <b>AI INSIGHT:</b>\n<pre>{ai_insight}</pre>\n\n"
+                    f"🔗 <a href='{pdf_link}'>Try PDF</a> | <a href='{safe_link}'>View on NSE</a>\n"
                     f"🕒 <i>{raw_date}</i>"
                 )
                 

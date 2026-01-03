@@ -20,11 +20,12 @@ BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
-# Configure AI (Switched to standard 'gemini-pro' for stability)
+# Configure AI - USING THE LATEST PRO MODEL
 if GEMINI_KEY:
     try:
         genai.configure(api_key=GEMINI_KEY)
-        model = genai.GenerativeModel('gemini-pro')
+        # UPDATED MODEL NAME HERE
+        model = genai.GenerativeModel('gemini-1.5-pro')
     except Exception as e:
         print(f"❌ AI Config Error: {e}")
 
@@ -35,23 +36,24 @@ WATCHLIST = [
 ]
 
 def analyze_news_with_ai(symbol, category, headline):
-    """Asks Gemini to analyze the news impact."""
+    """Asks Gemini 1.5 Pro to analyze the news impact."""
     if not GEMINI_KEY: return "⚠️ AI Key Missing"
     
     prompt = (
-        f"Act as a hedge fund analyst. Analyze this news for Indian stock '{symbol}':\n"
+        f"Act as a senior market analyst. Analyze this news for Indian stock '{symbol}':\n"
         f"Category: {category}\n"
         f"Headline: {headline}\n\n"
-        "Output format:\n"
+        "Provide a 1-sentence analysis of the impact on the stock price.\n"
+        "Format:\n"
         "IMPACT: [BULLISH/BEARISH/NEUTRAL]\n"
-        "REASON: [One short sentence explaining why]"
+        "INSIGHT: [Your 1-sentence analysis]"
     )
     
     try:
+        # Added safety settings to prevent blocking finance talk
         response = model.generate_content(prompt)
         return response.text.strip()
     except Exception as e:
-        # RETURN THE REAL ERROR TO TELEGRAM
         print(f"❌ AI Error: {e}")
         return f"⚠️ Error: {str(e)}"
 
@@ -78,7 +80,7 @@ def get_nse_data():
         return []
 
 def check_for_fresh_news():
-    print(f"🚀 Scanning NSE (V5.1 Debug)... [{datetime.now().strftime('%H:%M:%S')}]")
+    print(f"🚀 Scanning NSE (Gemini 1.5 Pro)... [{datetime.now().strftime('%H:%M:%S')}]")
     data = get_nse_data()
     
     now = datetime.now()

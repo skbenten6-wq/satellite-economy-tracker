@@ -20,7 +20,7 @@ BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
-# --- AI CONFIGURATION (Gemini 3 Pro) ---
+# --- AI CONFIGURATION ---
 if GEMINI_KEY:
     try:
         genai.configure(api_key=GEMINI_KEY)
@@ -34,22 +34,23 @@ WATCHLIST = [
 ]
 
 def analyze_news_with_ai(symbol, category, headline):
-    """Asks Gemini 3 Pro (with fallback) to analyze news."""
+    """Asks Gemini 3 Pro (from your confirmed list) to analyze news."""
     if not GEMINI_KEY: return "⚠️ AI Key Missing"
     
     prompt = (
-        f"Analyze this news for Indian stock '{symbol}':\n"
+        f"Analyze this corporate filing for Indian stock '{symbol}':\n"
         f"Category: {category}\n"
         f"Headline: {headline}\n\n"
-        "1. Is this BULLISH, BEARISH, or NEUTRAL?\n"
-        "2. Why? (1 short sentence)\n"
-        "Format: IMPACT: [Status]\nINSIGHT: [Reason]"
+        "Task: Determine if this is good (BULLISH), bad (BEARISH), or neutral for the stock price.\n"
+        "Output Format:\n"
+        "IMPACT: [BULLISH/BEARISH/NEUTRAL]\n"
+        "INSIGHT: [1 concise sentence explaining the financial implication]"
     )
     
-    # LIST OF MODELS TO TRY (Priority Order)
-    # 1. Gemini 3 Pro (Most Intelligent)
-    # 2. Gemini 1.5 Flash (Fastest/Stable Backup)
-    models_to_try = ['gemini-3-pro-preview', 'gemini-1.5-flash']
+    # EXACT NAMES FROM YOUR SCREENSHOT
+    # Priority 1: The smartest model you have
+    # Priority 2: The fastest model you have
+    models_to_try = ['gemini-3-pro-preview', 'gemini-2.5-flash']
     
     for model_name in models_to_try:
         try:
@@ -57,10 +58,10 @@ def analyze_news_with_ai(symbol, category, headline):
             response = model.generate_content(prompt)
             return response.text.strip()
         except Exception as e:
-            print(f"⚠️ Failed with {model_name}: {e}")
-            continue # Try next model
+            # If the first one fails, try the next one silently
+            continue 
             
-    return "⚠️ All AI Models Failed"
+    return "⚠️ AI Analysis Unavailable"
 
 def send_telegram_alert(msg):
     if not BOT_TOKEN or not CHAT_ID: return

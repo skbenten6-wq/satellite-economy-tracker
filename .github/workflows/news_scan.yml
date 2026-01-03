@@ -3,7 +3,7 @@ name: High-Frequency News Scraper
 on:
   schedule:
     - cron: '*/5 * * * *' # Run every 5 minutes
-  workflow_dispatch: # Allow manual button click
+  workflow_dispatch: # Manual Trigger
 
 jobs:
   scrape-nse:
@@ -22,7 +22,8 @@ jobs:
         run: pip install requests
 
       - name: Run News Bot
-        # env:
-          # TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          # TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        env:
+          # THIS IS THE CRITICAL PART - PASS THE SECRETS
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python news_bot.py

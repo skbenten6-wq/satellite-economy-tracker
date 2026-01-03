@@ -58,7 +58,7 @@ if GEMINI_KEY:
 def get_live_market_data():
     """Fetches real-time prices for Group A"""
     data_summary = "📊 <b>LIVE MARKET DASHBOARD</b>\n\n"
-    raw_text = "LIVE DATA:\n" 
+    raw_text = "--- LIVE DATA ---\n" 
     
     print("📊 Fetching Live Tickers...")
     
@@ -76,6 +76,7 @@ def get_live_market_data():
                 raw_text += f"{name}: {price:.2f} ({change:+.2f}%)\n"
             else:
                 data_summary += f"⚪ <b>{name}</b>: N/A\n"
+                raw_text += f"{name}: N/A\n"
         except:
             data_summary += f"⚪ <b>{name}</b>: Error\n"
             
@@ -84,7 +85,7 @@ def get_live_market_data():
 def hunt_for_economic_data():
     """Scrapes news headlines to find the latest Economic Data for Group B"""
     data_summary = "📰 <b>ECONOMIC NEWS FEED</b>\n\n"
-    raw_text = "NEWS DATA:\n" 
+    raw_text = "\n--- NEWS DATA ---\n" 
     
     print("🕵️‍♂️ Hunting for Economic Reports...")
     
@@ -114,15 +115,15 @@ def hunt_for_economic_data():
             raw_text += f"{indicator_name}: {title}\n"
         else:
             data_summary += f"🔸 {indicator_name}: No recent news.\n"
+            raw_text += f"{indicator_name}: No recent news\n"
             
     return data_summary, raw_text
 
 def generate_grand_strategy(full_data_text):
-    """Sends the massive 25-point dataset to Gemini (With Smart Retry)"""
-    if not GEMINI_KEY: return "⚠️ AI Key Missing"
+    """Sends the data to Gemini. Returns (Success_Bool, Content)"""
+    if not GEMINI_KEY: return False, "⚠️ AI Key Missing"
     
-    # CORRECT MODEL LIST (Based on your Screenshot)
-    # We use 'gemini-flash-latest' instead of 'gemini-1.5-flash' to avoid 404
+    # MODELS FROM YOUR SCREENSHOT (Verified)
     models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest']
     
     prompt = (
@@ -135,32 +136,28 @@ def generate_grand_strategy(full_data_text):
         "🏗️ <b>SECTOR STRATEGY:</b> [Allocations]"
     )
     
-    last_error = ""
+    last_error = "Unknown Error"
     
     for m in models:
-        for attempt in range(2): # Try each model twice
+        for attempt in range(2): 
             try:
                 print(f"🧠 Thinking with {m} (Attempt {attempt+1})...")
                 model = genai.GenerativeModel(m)
                 response = model.generate_content(prompt)
-                return response.text.strip()
+                return True, response.text.strip()
+                
             except Exception as e:
                 error_msg = str(e)
-                # IF QUOTA HIT (429) -> WAIT 30 SECONDS
                 if "429" in error_msg:
-                    print(f"⚠️ Quota Hit on {m}! Cooling down for 30s...")
-                    time.sleep(30)
-                    continue 
+                    print(f"⚠️ Quota Hit ({m}). Cooling 60s...")
+                    time.sleep(60) # Increased to 60s
+                    continue
                 
-                # IF MODEL NOT FOUND (404) -> SKIP IMMEDIATELY
-                if "404" in error_msg:
-                    print(f"❌ Model {m} not found, skipping...")
-                    last_error = error_msg
-                    break
-                
+                print(f"❌ Error ({m}): {error_msg}")
                 last_error = error_msg
+                break # Move to next model if not 429
             
-    return f"⚠️ <b>AI Failed:</b> {last_error}"
+    return False, f"⚠️ <b>AI Analysis Failed.</b>\nReason: {last_error}"
 
 def send_telegram(msg):
     if not BOT_TOKEN or not CHAT_ID: return
@@ -177,25 +174,41 @@ def send_telegram(msg):
 def run_omni_scanner():
     print(f"🚀 Starting Omni-Scanner... [{datetime.now().strftime('%H:%M')}]")
     
-    telegram_live, ai_live = get_live_market_data()
+    # 1. Gather & Send Raw Data First
+    telegram_live, raw_live = get_live_market_data()
     send_telegram(telegram_live)
     
-    telegram_news, ai_news = hunt_for_economic_data()
+    telegram_news, raw_news = hunt_for_economic_data()
     send_telegram(telegram_news)
     
+    # 2. Prepare Dossier
+    full_dossier = raw_live + raw_news
+    
+    # 3. Attempt AI Analysis
     print("🧠 Analyzing Matrix...")
-    full_dossier = ai_live + "\n" + ai_news
-    analysis = generate_grand_strategy(full_dossier)
+    success, analysis = generate_grand_strategy(full_dossier)
     
-    final_msg = (
-        f"🏛️ <b>THE OMNI-SCANNER REPORT</b>\n"
-        f"<i>{datetime.now().strftime('%d %b %Y')}</i>\n\n"
-        f"{analysis}\n\n"
-        f"🔍 <i>Based on 25-Point Macro Matrix</i>"
-    )
-    
-    send_telegram(final_msg)
-    print("✅ All Reports Sent.")
+    if success:
+        # If AI works, send the nice report
+        final_msg = (
+            f"🏛️ <b>THE OMNI-SCANNER REPORT</b>\n"
+            f"<i>{datetime.now().strftime('%d %b %Y')}</i>\n\n"
+            f"{analysis}\n\n"
+            f"🔍 <i>Based on 25-Point Macro Matrix</i>"
+        )
+        send_telegram(final_msg)
+        print("✅ AI Report Sent.")
+    else:
+        # IF AI FAILS: Send the error + THE RAW DATA
+        print("❌ AI Failed. Sending Raw Data fallback.")
+        
+        # We wrap the data in <pre> tags so it's easy to copy
+        fallback_msg = (
+            f"{analysis}\n\n"
+            f"📋 <b>RAW DATA SUMMARY (Copy & Paste to AI):</b>\n"
+            f"<pre>{full_dossier}</pre>"
+        )
+        send_telegram(fallback_msg)
 
 if __name__ == "__main__":
     run_omni_scanner()

@@ -37,7 +37,7 @@ googlenews.set_lang('en')
 googlenews.set_encode('utf-8')
 
 # ==========================================
-# 2. TARGET LIST (With Stock Tickers)
+# 2. TARGET LIST (CORRECTED TICKERS)
 # ==========================================
 targets = {
     "1. COAL INDIA (Gevra Mine)": { 
@@ -80,7 +80,7 @@ targets = {
         "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, 
         "query": "Cement demand India", 
         "desc": "Grey Dust & Quarry",
-        "ticker": "ULTRATECH.NS" 
+        "ticker": "ULTRACEMCO.NS" # <-- FIXED TICKER
     },
     "7. ADANI PORTS (Mundra)": { 
         "roi": [69.6900, 22.7300, 69.7300, 22.7600], 
@@ -108,7 +108,7 @@ targets = {
         "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, 
         "query": "Jewar Airport status", 
         "desc": "Construction Progress",
-        "ticker": "GMRINFRA.NS" # Proxy: GMR Airports Infra
+        "ticker": "GMRAIRPORT.NS" # <-- FIXED TICKER
     },
     "11. BHADLA SOLAR (Energy)": { 
         "roi": [71.9000, 27.5300, 71.9400, 27.5600], 
@@ -136,13 +136,18 @@ def get_valuation_data(ticker):
     
     try:
         stock = yf.Ticker(ticker)
-        info = stock.info
-        hist = stock.history(period="1mo")
+        # Using fast_info sometimes is safer for prices, but .info is standard
+        info = stock.info 
         
+        # Safe Fetching
         current_price = info.get('currentPrice', 0)
+        if current_price == 0: # Fallback
+             current_price = info.get('regularMarketPreviousClose', 0)
+
         pe_ratio = info.get('trailingPE', 0)
         
         # Calculate 1-Month Return
+        hist = stock.history(period="1mo")
         if not hist.empty:
             start_price = hist['Close'].iloc[0]
             change_pct = ((current_price - start_price) / start_price) * 100
@@ -161,11 +166,11 @@ def get_valuation_data(ticker):
                 signal = "OVERVALUED"
                 color = "red"
             elif change_pct > 15:
-                signal = "HEATED (PRICED IN)"
+                signal = "HEATED"
                 color = "orange"
         
         return {
-            "price": f"₹{current_price}",
+            "price": f"Rs. {current_price}", # <-- FIXED: No Rupee Symbol
             "pe": f"{pe_ratio:.1f}x",
             "change": f"{change_pct:+.1f}%",
             "signal": signal,
@@ -198,7 +203,10 @@ def get_market_news(query):
         link = item.get('link', '')
         date = item.get('date', 'Recent')
         if link.startswith("./"): link = f"https://news.google.com{link[1:]}"
-        clean_title = title.encode('latin-1', 'ignore').decode('latin-1')
+        
+        # Clean Title for PDF (Fix Encoding)
+        clean_title = title.encode('ascii', 'ignore').decode('ascii') 
+        
         if "http" in link: news_data.append({'title': clean_title, 'link': link, 'date': date})
     if not news_data:
         safe_link = f"https://www.google.com/search?q={urllib.parse.quote(query)}&tbm=nws"
@@ -265,9 +273,12 @@ for i, (name, data) in enumerate(targets.items()):
     # 3. BUILD PDF PAGE
     pdf.add_page()
     pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, f"{name}", ln=True)
     
-    # Valuation Line in PDF
+    # Ensure name is PDF safe
+    clean_name = name.encode('ascii', 'ignore').decode('ascii')
+    pdf.cell(0, 10, f"{clean_name}", ln=True)
+    
+    # Valuation Line in PDF (Using Rs. instead of Symbol)
     pdf.set_font("Arial", "B", 10)
     pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 8, f"Price: {val_data['price']} | P/E: {val_data['pe']} | Signal: {val_data['signal']}", ln=True)

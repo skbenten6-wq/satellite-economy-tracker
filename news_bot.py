@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 
 # --- CONFIGURATION ---
 NSE_API = "https://www.nseindia.com/api/corporate-announcements?index=equities"
-# Base URLs
 URL_CORP = "https://nsearchives.nseindia.com/corporate/"
 URL_SME = "https://nsearchives.nseindia.com/sme/"
 
@@ -49,7 +48,7 @@ def get_nse_data():
         return []
 
 def check_for_fresh_news():
-    print(f"🚀 Scanning NSE for Deep Intel... [{datetime.now().strftime('%H:%M:%S')}]")
+    print(f"🚀 Scanning NSE (V4.0 Safety Net)... [{datetime.now().strftime('%H:%M:%S')}]")
     data = get_nse_data()
     
     now = datetime.now()
@@ -67,24 +66,30 @@ def check_for_fresh_news():
             symbol = item.get('symbol')
             category = item.get('desc') 
             
-            # --- FIX 1: HEADLINE FALLBACK ---
-            # Try 'caption', then 'remarks', then 'desc' to avoid "None"
-            headline = item.get('caption') or item.get('remarks') or category
+            # --- FIX 1: HEADLINE (Keep what works) ---
+            raw_headline = (
+                item.get('caption') or 
+                item.get('subject') or 
+                item.get('remarks') or 
+                category
+            )
+            headline = raw_headline.strip() if raw_headline else "Details N/A"
             
-            # --- FIX 2: SMART LINKING (SME vs CORP) ---
+            # --- FIX 2: THE SAFETY NET LINKS ---
             attachment = item.get('attchmntText')
             
-            # Default to Corporate folder
-            pdf_link = f"{URL_CORP}{attachment}"
-            
-            # If the link looks different (some SME files start differently) or logic dictates
-            # Note: A perfect SME check requires checking the 'series' field 'SM' or 'ST'
-            if item.get('series') in ['SM', 'ST', 'SME']:
+            # Try to detect SME (Small Enterprise)
+            # SME symbols are often different or have specific series, 
+            # but if we can't be sure, we default to CORP.
+            # If this link fails, the user hits "View on NSE"
+            if item.get('series') in ['SM', 'ST', 'SME', 'SY']:
                 pdf_link = f"{URL_SME}{attachment}"
-            
-            # Fallback: Just search the company if no attachment
-            if not attachment:
-                pdf_link = f"https://www.nseindia.com/get-quotes/equity?symbol={symbol}"
+            else:
+                pdf_link = f"{URL_CORP}{attachment}"
+                
+            # THE GUARANTEED LINK (Company Quote Page)
+            # This page always exists and lists recent announcements
+            safe_link = f"https://www.nseindia.com/get-quotes/equity?symbol={symbol}"
 
             # Filter Logic
             full_text = f"{category} {headline}"
@@ -94,7 +99,7 @@ def check_for_fresh_news():
                 alert_msg = (
                     f"<b>🚨 {symbol}</b> | {category}\n\n"
                     f"📰 <b>{headline}</b>\n\n"
-                    f"🔗 <a href='{pdf_link}'>Read Official Document (PDF)</a>\n"
+                    f"🔗 <a href='{pdf_link}'>Try PDF</a> | <a href='{safe_link}'>View on NSE (Guaranteed)</a>\n"
                     f"🕒 <i>{raw_date}</i>"
                 )
                 

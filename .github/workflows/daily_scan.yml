@@ -1,32 +1,22 @@
-name: Daily Economy Scan (Satellite + News)
+name: Daily Satellite Scan
 
 on:
   schedule:
-    - cron: '0 2 * * *' # 7:30 AM IST
+    - cron: '0 8 * * *' # 8:00 AM UTC
   workflow_dispatch:
 
 jobs:
   run-intelligence:
     runs-on: ubuntu-latest
-
+    
     steps:
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10' # <--- Upgraded to handle yfinance
-
-      - name: Install Libraries
-        # Added 'GoogleNews' and 'smtplib' is built-in
-        run: |
-          pip install earthengine-api geemap matplotlib pillow google-auth requests GoogleNews
-
-      - name: Install Libraries
-        # Added 'fpdf' to the list
-        run: |
-          pip install earthengine-api geemap matplotlib pillow google-auth requests GoogleNews fpdf
+          python-version: '3.10'
 
       - name: Install Libraries
         run: |
@@ -37,4 +27,7 @@ jobs:
           EE_KEY: ${{ secrets.EE_KEY }}
           MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
           MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+          # ADD THESE TWO LINES
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py

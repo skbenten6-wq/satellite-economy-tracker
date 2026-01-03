@@ -5,18 +5,16 @@ from GoogleNews import GoogleNews
 from datetime import datetime
 
 # --- CONFIGURATION ---
-# Targets: We look for rumors in these specific sectors/companies
 TARGETS = [
     "Adani", "Tata", "Reliance", "Vedanta", "Zomato", "Paytm", 
     "Merger", "Acquisition", "Stake Sale", "IPO"
 ]
 
-# The "Gossip" Dictionary
-# We only care if the news contains these specific speculative words
+# RUMOR KEYWORDS (Triggers)
 RUMOR_KEYWORDS = [
     "sources say", "reportedly", "in talks", "likely to", 
     "considering", "mulling", "exclusive", "potential deal",
-    "unconfirmed", "buzz"
+    "unconfirmed", "buzz", "spotted", "leak"
 ]
 
 # SECRETS
@@ -30,27 +28,42 @@ if GEMINI_KEY:
         genai.configure(api_key=GEMINI_KEY)
     except: pass
 
+def clean_google_link(link):
+    """Fixes the broken '404' links from Google News."""
+    if not link: return "https://news.google.com"
+    
+    # Google often returns links starting with "./"
+    if link.startswith("./"):
+        return f"https://news.google.com{link[1:]}"
+    
+    # Sometimes it returns just "articles/..."
+    if link.startswith("articles/"):
+        return f"https://news.google.com/{link}"
+        
+    return link
+
 def get_ai_opinion(headline):
-    """Asks Gemini: Is this a juicy rumor or just noise?"""
+    """Asks Gemini 3 Pro: Is this gossip worth trading?"""
     if not GEMINI_KEY: return "AI Unavailable"
     
-    # We use the fast model for gossips
-    models = ['gemini-1.5-flash', 'gemini-pro']
+    # 1. USE YOUR VERIFIED PREMIUM MODELS
+    models_to_try = ['gemini-3-pro-preview', 'gemini-2.5-flash']
     
     prompt = (
         f"Analyze this rumor headline: '{headline}'\n"
         "1. CREDIBILITY: [High/Low/Speculation]\n"
         "2. IF TRUE, IMPACT: [Bullish/Bearish]\n"
-        "Keep it very short."
+        "Keep it very short (max 2 sentences)."
     )
     
-    for m in models:
+    for m in models_to_try:
         try:
             model = genai.GenerativeModel(m)
             response = model.generate_content(prompt)
             return response.text.strip()
         except: continue
-    return "AI Analysis Failed"
+            
+    return "⚠️ AI Analysis Failed"
 
 def send_telegram(msg):
     if not BOT_TOKEN or not CHAT_ID: return
@@ -61,16 +74,14 @@ def send_telegram(msg):
 def hunt_for_gossip():
     print(f"🕵️‍♂️ Gossip Hunter Active... [{datetime.now().strftime('%H:%M')}]")
     
-    googlenews = GoogleNews(period='4h') # Look back only 4 hours
+    # Look back 4 hours to catch fresh rumors
+    googlenews = GoogleNews(period='4h') 
     googlenews.set_lang('en')
     googlenews.set_encode('utf-8')
     
     seen_links = set()
     
-    # search for combined queries like "Adani sources say"
     for target in TARGETS:
-        # Construct a search query that forces rumor keywords
-        # Example: "Tata sources say" OR "Tata reportedly"
         search_query = f"{target} India"
         googlenews.search(search_query)
         results = googlenews.result()
@@ -78,9 +89,12 @@ def hunt_for_gossip():
         
         for item in results:
             title = item.get('title', '')
-            link = item.get('link', '')
+            raw_link = item.get('link', '')
             
-            # 1. FILTER: Must contain a Rumor Keyword
+            # --- FIX 1: CLEAN THE LINK ---
+            link = clean_google_link(raw_link)
+            
+            # FILTER: Must contain a Rumor Keyword
             is_gossip = any(k.lower() in title.lower() for k in RUMOR_KEYWORDS)
             
             if is_gossip and link not in seen_links:
@@ -88,14 +102,14 @@ def hunt_for_gossip():
                 
                 print(f"👀 Spot: {title}")
                 
-                # 2. ANALYZE: Ask AI how spicy this is
+                # --- FIX 2: AI ANALYSIS WITH GEMINI 3 ---
                 ai_take = get_ai_opinion(title)
                 
                 msg = (
                     f"🤫 <b>GOSSIP DETECTED</b> | {target}\n\n"
                     f"🗣️ <i>{title}</i>\n\n"
                     f"🔮 <b>AI READ:</b>\n<pre>{ai_take}</pre>\n\n"
-                    f"🔗 <a href='{link}'>Source</a>"
+                    f"🔗 <a href='{link}'>Read Source</a>"
                 )
                 
                 send_telegram(msg)

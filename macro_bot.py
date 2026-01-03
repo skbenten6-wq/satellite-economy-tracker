@@ -106,7 +106,6 @@ def hunt_for_economic_data():
             safe_query = urllib.parse.quote(title)
             search_link = f"https://www.google.com/search?q={safe_query}"
             
-            # Format: Title -> [Source Link] | [Google Search]
             data_summary += (
                 f"🔹 <b>{indicator_name}</b>\n"
                 f"└ <a href='{link}'>{title}</a>\n"
@@ -119,11 +118,12 @@ def hunt_for_economic_data():
     return data_summary, raw_text
 
 def generate_grand_strategy(full_data_text):
-    """Sends the massive 25-point dataset to Gemini (With Retry Logic)"""
+    """Sends the massive 25-point dataset to Gemini (With Smart Retry)"""
     if not GEMINI_KEY: return "⚠️ AI Key Missing"
     
-    # ADDED: A 3rd backup model (1.5 Flash) which is very light on quota
-    models = ['gemini-3-pro-preview', 'gemini-2.5-flash', 'gemini-1.5-flash']
+    # CORRECT MODEL LIST (Based on your Screenshot)
+    # We use 'gemini-flash-latest' instead of 'gemini-1.5-flash' to avoid 404
+    models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest']
     
     prompt = (
         "Act as a Chief Economist. Analyze these 25 macro indicators for India:\n\n"
@@ -138,8 +138,7 @@ def generate_grand_strategy(full_data_text):
     last_error = ""
     
     for m in models:
-        # RETRY LOOP: Try each model up to 3 times
-        for attempt in range(3):
+        for attempt in range(2): # Try each model twice
             try:
                 print(f"🧠 Thinking with {m} (Attempt {attempt+1})...")
                 model = genai.GenerativeModel(m)
@@ -147,15 +146,19 @@ def generate_grand_strategy(full_data_text):
                 return response.text.strip()
             except Exception as e:
                 error_msg = str(e)
-                # If we hit the Speed Limit (429), WAIT and RETRY
+                # IF QUOTA HIT (429) -> WAIT 30 SECONDS
                 if "429" in error_msg:
-                    print(f"⚠️ Quota Hit! Cooling down for 10 seconds...")
-                    time.sleep(10)
-                    continue
-                else:
-                    # If it's a real error (like 404), move to the next model immediately
+                    print(f"⚠️ Quota Hit on {m}! Cooling down for 30s...")
+                    time.sleep(30)
+                    continue 
+                
+                # IF MODEL NOT FOUND (404) -> SKIP IMMEDIATELY
+                if "404" in error_msg:
+                    print(f"❌ Model {m} not found, skipping...")
                     last_error = error_msg
                     break
+                
+                last_error = error_msg
             
     return f"⚠️ <b>AI Failed:</b> {last_error}"
 
@@ -174,15 +177,12 @@ def send_telegram(msg):
 def run_omni_scanner():
     print(f"🚀 Starting Omni-Scanner... [{datetime.now().strftime('%H:%M')}]")
     
-    # 1. Live Data
     telegram_live, ai_live = get_live_market_data()
     send_telegram(telegram_live)
     
-    # 2. News Data
     telegram_news, ai_news = hunt_for_economic_data()
     send_telegram(telegram_news)
     
-    # 3. AI Analysis
     print("🧠 Analyzing Matrix...")
     full_dossier = ai_live + "\n" + ai_news
     analysis = generate_grand_strategy(full_dossier)

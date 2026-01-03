@@ -2,8 +2,8 @@ name: High-Frequency News Scraper
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # Run every 5 minutes
-  workflow_dispatch: # Manual Trigger
+    - cron: '*/5 * * * *' 
+  workflow_dispatch: 
 
 jobs:
   scrape-nse:
@@ -16,14 +16,16 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          # Use 3.10 for better library support
+          python-version: '3.10' 
 
       - name: Install Libraries
-        run: pip install requests
+        # Added google-generativeai
+        run: pip install requests google-generativeai
 
       - name: Run News Bot
         env:
-          # THIS IS THE CRITICAL PART - PASS THE SECRETS
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} # <--- NEW SECRET
         run: python news_bot.py

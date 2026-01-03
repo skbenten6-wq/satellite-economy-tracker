@@ -1,13 +1,12 @@
-name: Daily Economy Scan (GEE)
+name: Daily Economy Scan (Satellite + News)
 
 on:
   schedule:
-    # 02:30 UTC = 8:00 AM India Standard Time
-    - cron: '30 2 * * *'
+    - cron: '0 2 * * *' # 7:30 AM IST
   workflow_dispatch:
 
 jobs:
-  run-and-email:
+  run-intelligence:
     runs-on: ubuntu-latest
 
     steps:
@@ -20,24 +19,13 @@ jobs:
           python-version: '3.9'
 
       - name: Install Libraries
+        # Added 'GoogleNews' and 'smtplib' is built-in
         run: |
-          pip install earthengine-api geemap matplotlib pillow google-auth requests
+          pip install earthengine-api geemap matplotlib pillow google-auth requests GoogleNews
 
-      - name: Run Satellite Tracker
+      - name: Run Intelligence Script
         env:
           EE_KEY: ${{ secrets.EE_KEY }}
+          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
         run: python main.py
-
-      - name: Send Email
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          secure: true
-          username: ${{ secrets.MAIL_USERNAME }}
-          password: ${{ secrets.MAIL_PASSWORD }}
-          subject: "🛰️ Daily India Economy Dashboard (12-Sector)"
-          to: aman.nitbhopal@gmail.com
-          from: "Satellite Bot"
-          body: "Here is your 12-Sector Economy Dashboard for today."
-          attachments: dashboard.png

@@ -10,19 +10,19 @@ from datetime import datetime
 # 1. THE 25-POINT MATRIX
 # ==========================================
 
-# GROUP A: LIVE TICKERS (We get these instantly from Yahoo Finance)
+# GROUP A: LIVE TICKERS (Yahoo Finance)
 LIVE_INDICATORS = {
     "1. USD/INR":       "INR=X",
     "2. US 10Y Yield":  "^TNX",
     "5. Dollar Index":  "DX-Y.NYB",
     "16. India VIX":    "^INDIAVIX",
-    "17. Nifty 50":     "^NSEI",     # For Context
+    "17. Nifty 50":     "^NSEI",     
     "22. Copper":       "HG=F",
     "15. Crude Oil":    "CL=F",
-    "Gold":             "GC=F"       # Added for correlation
+    "Gold":             "GC=F"       
 }
 
-# GROUP B: DATA HUNT (We search Google News for these values)
+# GROUP B: DATA HUNT (Google News)
 DATA_HUNT_QUERIES = [
     "3. US Fed Funds Rate current",
     "4. FII DII activity yesterday India",
@@ -59,7 +59,9 @@ if GEMINI_KEY:
 
 def get_live_market_data():
     """Fetches real-time prices for Group A"""
-    data_summary = "--- LIVE MARKET DATA ---\n"
+    data_summary = "📊 **LIVE MARKET DASHBOARD**\n"
+    raw_text = "LIVE DATA:\n" # For AI
+    
     print("📊 Fetching Live Tickers...")
     
     for name, ticker in LIVE_INDICATORS.items():
@@ -70,58 +72,67 @@ def get_live_market_data():
                 price = hist['Close'].iloc[-1]
                 prev = hist['Close'].iloc[-2]
                 change = ((price - prev) / prev) * 100
-                data_summary += f"{name}: {price:.2f} ({change:+.2f}%)\n"
+                
+                # Format for Telegram
+                icon = "🟢" if change >= 0 else "🔴"
+                data_summary += f"{icon} *{name}*: `{price:.2f}` ({change:+.2f}%)\n"
+                raw_text += f"{name}: {price:.2f} ({change:+.2f}%)\n"
+            else:
+                data_summary += f"⚪ *{name}*: N/A\n"
         except:
-            data_summary += f"{name}: N/A\n"
+            data_summary += f"⚪ *{name}*: Error\n"
             
-    return data_summary
+    return data_summary, raw_text
 
 def hunt_for_economic_data():
     """Scrapes news headlines to find the latest Economic Data for Group B"""
-    data_summary = "\n--- ECONOMIC DATA HUNT ---\n"
+    data_summary = "📰 **ECONOMIC NEWS FEED**\n"
+    raw_text = "NEWS DATA:\n" # For AI
+    
     print("🕵️‍♂️ Hunting for Economic Reports...")
     
-    googlenews = GoogleNews(period='7d') # Look for fresh data
+    googlenews = GoogleNews(period='7d') 
     
     for query in DATA_HUNT_QUERIES:
         googlenews.clear()
         googlenews.search(query)
         results = googlenews.result()
         
-        # We take the top 1 most relevant headline for each indicator
+        indicator_name = query.split(' ', 1)[1]
+        
         if results:
             top_result = results[0]
             title = top_result['title']
-            # data_summary += f"{query.split(' ')[1]} Data: {title}\n"
-            # Just keeping the query key for context
-            indicator_name = query.split(' ', 1)[1] 
-            data_summary += f"Query '{indicator_name}': {title}\n"
-        else:
-            data_summary += f"{query}: No recent news found.\n"
+            link = top_result['link']
             
-    return data_summary
+            # Format for Telegram (Hyperlinked Title)
+            data_summary += f"🔹 <a href='{link}'>{indicator_name}</a>\n   └ <i>{title}</i>\n"
+            raw_text += f"{indicator_name}: {title}\n"
+        else:
+            data_summary += f"🔸 {indicator_name}: No recent news.\n"
+            
+    return data_summary, raw_text
 
 def generate_grand_strategy(full_data_text):
     """Sends the massive 25-point dataset to Gemini 3 Pro"""
-    if not GEMINI_KEY: return "AI Unavailable"
+    if not GEMINI_KEY: return "⚠️ AI Key Missing"
     
-    # Priority Order for Models
     models = ['gemini-3-pro-preview', 'gemini-2.5-flash']
     
     prompt = (
         "Act as a Chief Economist for a Hedge Fund. "
-        "I have gathered 25 critical macro indicators for the Indian Market below. "
-        "Some are live prices, some are news headlines containing the data.\n\n"
+        "I have gathered 25 critical macro indicators for the Indian Market below.\n"
+        "Some are live prices, some are news headlines.\n\n"
         f"{full_data_text}\n\n"
         "TASK:\n"
-        "1. Synthesize this data into a 'Market Regime' (e.g., Inflationary Growth, Stagflation, Risk-On, Risk-Off).\n"
-        "2. Identify the top 3 strongest positive signals and top 3 negative risks.\n"
-        "3. Provide a clear Sector Allocation Strategy (e.g., Overweight Banking, Underweight IT).\n\n"
+        "1. Synthesize this data into a 'Market Regime' (e.g., Inflationary Growth, Risk-Off).\n"
+        "2. Identify the top 3 Positive Signals and top 3 Negative Risks.\n"
+        "3. Provide a Sector Allocation Strategy.\n\n"
         "OUTPUT FORMAT:\n"
         "🌍 **MACRO REGIME:** [Name]\n"
         "✅ **TAILWINDS:** [List Top 3]\n"
         "⚠️ **HEADWINDS:** [List Top 3]\n"
-        "🏗️ **SECTOR STRATEGY:** [Specific Sectors to Buy/Avoid]"
+        "🏗️ **SECTOR STRATEGY:** [Sectors to Buy/Avoid]"
     )
     
     for m in models:
@@ -130,44 +141,50 @@ def generate_grand_strategy(full_data_text):
             response = model.generate_content(prompt)
             return response.text.strip()
         except Exception as e:
+            print(f"❌ Error with {m}: {e}") # Print error to GitHub logs
             continue
-    return "⚠️ AI Analysis Failed"
+            
+    return "⚠️ AI Analysis Failed (Check GitHub Logs for details)"
 
 def send_telegram(msg):
     if not BOT_TOKEN or not CHAT_ID: return
     
-    # Telegram has a char limit, so we might need to split massive reports
-    # But usually, the summary fits.
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}
+    payload = {
+        "chat_id": CHAT_ID, 
+        "text": msg, 
+        "parse_mode": "HTML", # Changed to HTML to support news links
+        "disable_web_page_preview": True
+    }
     requests.post(url, json=payload)
 
 def run_omni_scanner():
     print(f"🚀 Starting Omni-Scanner... [{datetime.now().strftime('%H:%M')}]")
     
-    # 1. Get Live Data
-    live_data = get_live_market_data()
+    # 1. Get Live Data & Send Immediately
+    telegram_live, ai_live = get_live_market_data()
+    send_telegram(telegram_live)
+    print("✅ Live Data Sent.")
     
-    # 2. Get News Data (This takes time, so be patient)
-    news_data = hunt_for_economic_data()
+    # 2. Get News Data & Send Immediately
+    telegram_news, ai_news = hunt_for_economic_data()
+    send_telegram(telegram_news)
+    print("✅ News Data Sent.")
     
-    # 3. Combine
-    full_dossier = live_data + news_data
-    
-    # 4. Analyze
+    # 3. Analyze & Send Report
     print("🧠 Analyzing Matrix...")
+    full_dossier = ai_live + "\n" + ai_news
     analysis = generate_grand_strategy(full_dossier)
     
-    # 5. Report
     final_msg = (
         f"🏛️ **THE OMNI-SCANNER REPORT**\n"
-        f"_{datetime.now().strftime('%d %b %Y')}_\n\n"
+        f"<i>{datetime.now().strftime('%d %b %Y')}</i>\n\n"
         f"{analysis}\n\n"
-        f"🔍 *Based on 25-Point Macro Matrix*"
+        f"🔍 <i>Based on 25-Point Macro Matrix</i>"
     )
     
     send_telegram(final_msg)
-    print("✅ Report Sent.")
+    print("✅ AI Report Sent.")
 
 if __name__ == "__main__":
     run_omni_scanner()

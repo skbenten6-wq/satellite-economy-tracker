@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 import urllib.parse
 import yfinance as yf
@@ -118,11 +119,11 @@ def hunt_for_economic_data():
     return data_summary, raw_text
 
 def generate_grand_strategy(full_data_text):
-    """Sends the massive 25-point dataset to Gemini 3 Pro"""
+    """Sends the massive 25-point dataset to Gemini (With Retry Logic)"""
     if not GEMINI_KEY: return "⚠️ AI Key Missing"
     
-    # Using your VERIFIED working models
-    models = ['gemini-3-pro-preview', 'gemini-2.5-flash']
+    # ADDED: A 3rd backup model (1.5 Flash) which is very light on quota
+    models = ['gemini-3-pro-preview', 'gemini-2.5-flash', 'gemini-1.5-flash']
     
     prompt = (
         "Act as a Chief Economist. Analyze these 25 macro indicators for India:\n\n"
@@ -135,16 +136,27 @@ def generate_grand_strategy(full_data_text):
     )
     
     last_error = ""
+    
     for m in models:
-        try:
-            model = genai.GenerativeModel(m)
-            response = model.generate_content(prompt)
-            return response.text.strip()
-        except Exception as e:
-            last_error = str(e)
-            continue
+        # RETRY LOOP: Try each model up to 3 times
+        for attempt in range(3):
+            try:
+                print(f"🧠 Thinking with {m} (Attempt {attempt+1})...")
+                model = genai.GenerativeModel(m)
+                response = model.generate_content(prompt)
+                return response.text.strip()
+            except Exception as e:
+                error_msg = str(e)
+                # If we hit the Speed Limit (429), WAIT and RETRY
+                if "429" in error_msg:
+                    print(f"⚠️ Quota Hit! Cooling down for 10 seconds...")
+                    time.sleep(10)
+                    continue
+                else:
+                    # If it's a real error (like 404), move to the next model immediately
+                    last_error = error_msg
+                    break
             
-    # RETURN THE ACTUAL ERROR so we can see it in Telegram
     return f"⚠️ <b>AI Failed:</b> {last_error}"
 
 def send_telegram(msg):

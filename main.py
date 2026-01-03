@@ -19,6 +19,7 @@ PROJECT_ID = "satellite-tracker-2026"
 EMAIL_USER = os.environ.get("MAIL_USERNAME")
 EMAIL_PASS = os.environ.get("MAIL_PASSWORD")
 
+# Authenticate Earth Engine
 try:
     service_account_info = json.loads(os.environ["EE_KEY"])
     credentials = Credentials.from_service_account_info(
@@ -31,12 +32,13 @@ except Exception as e:
     print(f"❌ [CRITICAL] Auth Failed: {e}")
     exit(1)
 
+# Initialize News (Strict 24h)
 googlenews = GoogleNews(period='1d') 
 googlenews.set_lang('en')
 googlenews.set_encode('utf-8')
 
 # ==========================================
-# 2. SECTOR TARGET LIST (12 KEY INDICATORS)
+# 2. TARGET LIST
 # ==========================================
 targets = {
     "1. COAL INDIA (Gevra Mine)": { "roi": [82.5600, 22.3100, 82.6000, 22.3500], "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, "query": "Coal India production", "desc": "Pit Expansion" },
@@ -56,7 +58,8 @@ targets = {
 # ==========================================
 # 3. HELPER FUNCTIONS
 # ==========================================
-def get_satellite_image(coords, vis, filename):
+def get_satellite_data(coords, vis, filename):
+    """Returns (Public URL, Download Success Boolean)"""
     roi = ee.Geometry.Rectangle(coords)
     col = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED').filterBounds(roi).filterDate('2024-12-01', '2025-01-04').filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20)).sort('system:time_start', False)
     
@@ -64,92 +67,157 @@ def get_satellite_image(coords, vis, filename):
         col = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED').filterBounds(roi).filterDate('2024-11-01', '2025-01-04').sort('system:time_start', False)
     
     if col.size().getInfo() > 0:
-        url = col.first().getThumbURL({'min': vis['min'], 'max': vis['max'], 'bands': vis['bands'], 'region': roi, 'format': 'png', 'dimensions': 800}) # High Res for PDF
-        urllib.request.urlretrieve(url, filename)
-        return True
-    return False
+        # Get URL
+        url = col.first().getThumbURL({'min': vis['min'], 'max': vis['max'], 'bands': vis['bands'], 'region': roi, 'format': 'png', 'dimensions': 600})
+        # Download for PDF
+        try:
+            urllib.request.urlretrieve(url, filename)
+            return url, True
+        except:
+            return url, False
+    return None, False
 
 def get_market_news(query):
+    """Returns list of dicts with Title, Link, Date"""
     googlenews.clear()
     googlenews.search(query)
     results = googlenews.result()
-    news_items = []
+    news_data = []
     
-    for item in results[:2]: # Top 2
+    for item in results[:2]:
         title = item.get('title', '')
+        link = item.get('link', '')
         date = item.get('date', 'Recent')
-        # Clean text for PDF (Remove Emojis/Unicode)
+        
+        # Link Hygiene
+        if link.startswith("./"): link = f"https://news.google.com{link[1:]}"
+        
+        # Clean Title for PDF
         clean_title = title.encode('latin-1', 'ignore').decode('latin-1')
-        news_items.append(f"[{date}] {clean_title}")
-    
-    if not news_items: return ["No significant news in last 24h."]
-    return news_items
+        
+        if "http" in link:
+            news_data.append({'title': clean_title, 'link': link, 'date': date})
+            
+    if not news_data:
+        # Safe Search Link
+        safe_link = f"https://www.google.com/search?q={urllib.parse.quote(query)}&tbm=nws"
+        news_data.append({'title': "No fresh news. Click to Search.", 'link': safe_link, 'date': "N/A"})
+        
+    return news_data
 
 # ==========================================
-# 4. GENERATE PDF REPORT
+# 4. REPORT GENERATION (HTML + PDF)
 # ==========================================
-print("🚀 [SYSTEM] Generating Intelligence Report...")
+print("🚀 [SYSTEM] Generating Hybrid Report...")
 
-# Initialize PDF
+# INIT PDF
 pdf = FPDF()
 pdf.set_auto_page_break(auto=True, margin=15)
 
-# Initialize HTML Email Body
-html_body = "<html><body><h2>Supply Chain Alpha Report</h2><p>Attached is the high-resolution PDF analysis.</p></body></html>"
+# INIT HTML
+html_report = """
+<html>
+<body style="font-family: Arial, sans-serif; background-color: #f4f6f7; padding: 20px;">
+    <div style="max-width: 800px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden;">
+        <div style="background-color: #2c3e50; padding: 20px; text-align: center; color: white;">
+            <h2 style="margin:0;">SUPPLY CHAIN ALPHA</h2>
+            <p style="margin:5px; font-size:12px;">Daily Satellite & News Intelligence</p>
+        </div>
+        <table style="width:100%; border-collapse: collapse;">
+"""
 
 for i, (name, data) in enumerate(targets.items()):
     print(f"   ...Processing: {name}")
     
-    # 1. Download High-Res Image locally
+    # 1. GET DATA
     img_filename = f"sector_{i}.png"
-    has_image = get_satellite_image(data['roi'], data['vis'], img_filename)
+    img_url, has_image = get_satellite_data(data['roi'], data['vis'], img_filename)
+    news_items = get_market_news(data['query'])
     
-    # 2. Fetch News
-    news = get_market_news(data['query'])
-    
-    # --- ADD TO PDF ---
+    # -----------------------------
+    # BUILD HTML (For Email Body)
+    # -----------------------------
+    news_html = ""
+    for n in news_items:
+        color = "green" if "ago" in n['date'] else "gray"
+        news_html += f"""
+        <div style="margin-bottom:5px; font-size:12px;">
+            <span style="color:{color}; font-weight:bold; font-size:10px;">[{n['date']}]</span>
+            <a href="{n['link']}" style="text-decoration:none; color:#2980b9; font-weight:bold;">{n['title']}</a>
+        </div>
+        """
+        
+    html_report += f"""
+    <tr style="border-bottom: 1px solid #eee;">
+        <td style="width: 40%; padding: 15px; background-color: #f9f9f9;">
+            <div style="font-size:14px; font-weight:800; color:#2c3e50;">{name}</div>
+            <div style="font-size:10px; color:#e67e22; margin-bottom:5px;">Strategy: {data['desc']}</div>
+            <img src="{img_url}" style="width:100%; border-radius:4px;">
+        </td>
+        <td style="width: 60%; padding: 15px; vertical-align:top;">
+            <div style="font-size:10px; font-weight:bold; color:#7f8c8d; margin-bottom:8px;">LATEST INTEL</div>
+            {news_html}
+        </td>
+    </tr>
+    """
+
+    # -----------------------------
+    # BUILD PDF (For Attachment)
+    # -----------------------------
     pdf.add_page()
-    
-    # Header
     pdf.set_font("Arial", "B", 16)
     pdf.cell(0, 10, f"{name}", ln=True)
+    
     pdf.set_font("Arial", "I", 10)
     pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 10, f"Target Strategy: {data['desc']}", ln=True)
+    pdf.cell(0, 10, f"Strategy: {data['desc']}", ln=True)
     
-    # News Section
-    pdf.set_text_color(0, 0, 0)
+    # News Links in PDF
     pdf.set_font("Arial", "", 10)
-    pdf.ln(5)
-    for news_line in news:
-        pdf.multi_cell(0, 8, f"- {news_line}")
+    pdf.set_text_color(0, 0, 255) # Blue Text
+    for n in news_items:
+        # Create a clickable cell
+        pdf.cell(0, 8, f"[{n['date']}] {n['title']}", ln=True, link=n['link'])
     
-    # Image Section
     pdf.ln(5)
+    
+    # Image in PDF
     if has_image:
-        # Full width image
         pdf.image(img_filename, x=10, w=190)
     else:
-        pdf.cell(0, 10, "[Satellite Data Unavailable - Cloud Cover]", ln=True)
+        pdf.set_text_color(255, 0, 0)
+        pdf.cell(0, 10, "[Cloud Cover - No Image]", ln=True)
 
-# Save PDF
-pdf_filename = "Daily_Intel_Report.pdf"
+# CLOSE HTML
+html_report += """
+        </table>
+        <div style="padding:15px; text-align:center; font-size:11px; color:#aaa;">
+            &copy; 2026 Satellite Bot | See attached PDF for high-res archives.
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+# SAVE PDF
+pdf_filename = "Supply_Chain_Intel.pdf"
 pdf.output(pdf_filename)
-print(f"✅ PDF Generated: {pdf_filename}")
+print("✅ PDF & HTML Generated.")
 
 # ==========================================
-# 5. DISPATCH EMAIL (WITH ATTACHMENT)
+# 5. DISPATCH EMAIL
 # ==========================================
-print("📧 [SYSTEM] Sending Dispatch...")
+print("📧 [SYSTEM] Sending Hybrid Dispatch...")
 
 msg = EmailMessage()
-msg['Subject'] = f"Supply Chain Alpha: {datetime.now().strftime('%d %b')} (PDF Report)"
+msg['Subject'] = f"Supply Chain Alpha: {datetime.now().strftime('%d %b')} (Hybrid Report)"
 msg['From'] = "Satellite Bot"
 msg['To'] = EMAIL_USER
 
-msg.add_alternative(html_body, subtype='html')
+# 1. Add HTML Body
+msg.add_alternative(html_report, subtype='html')
 
-# ATTACH PDF
+# 2. Add PDF Attachment
 with open(pdf_filename, 'rb') as f:
     file_data = f.read()
     msg.add_attachment(file_data, maintype='application', subtype='pdf', filename=pdf_filename)
@@ -158,4 +226,4 @@ with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
     smtp.login(EMAIL_USER, EMAIL_PASS)
     smtp.send_message(msg)
 
-print("✅ [SUCCESS] Report Sent.")
+print("✅ [SUCCESS] Email Sent with HTML Body + PDF Attachment.")

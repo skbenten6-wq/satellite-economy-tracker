@@ -4,7 +4,7 @@ on:
   schedule:
     - cron: '30 3 * * *'  # 9:00 AM IST (Pre-Market)
     - cron: '0 10 * * *'  # 3:30 PM IST (Market Close)
-  workflow_dispatch:
+  workflow_dispatch:      # Allows manual trigger
 
 jobs:
   macro-watch:
@@ -20,7 +20,8 @@ jobs:
           python-version: '3.10'
 
       - name: Install Libraries
-        run: pip install requests yfinance google-generativeai
+        # FIX IS HERE: Added 'GoogleNews' to the list
+        run: pip install requests yfinance google-generativeai GoogleNews
 
       - name: Run Macro Bot
         env:

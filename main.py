@@ -20,6 +20,10 @@ PROJECT_ID = "satellite-tracker-2026"
 EMAIL_USER = os.environ.get("MAIL_USERNAME")
 EMAIL_PASS = os.environ.get("MAIL_PASSWORD")
 
+# TELEGRAM KEYS (NEW)
+BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+
 try:
     service_account_info = json.loads(os.environ["EE_KEY"])
     credentials = Credentials.from_service_account_info(
@@ -37,7 +41,7 @@ googlenews.set_lang('en')
 googlenews.set_encode('utf-8')
 
 # ==========================================
-# 2. TARGET LIST (CORRECTED TICKERS)
+# 2. TARGET LIST
 # ==========================================
 targets = {
     "1. COAL INDIA (Gevra Mine)": { 
@@ -80,7 +84,7 @@ targets = {
         "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, 
         "query": "Cement demand India", 
         "desc": "Grey Dust & Quarry",
-        "ticker": "ULTRACEMCO.NS" # <-- FIXED TICKER
+        "ticker": "ULTRACEMCO.NS" 
     },
     "7. ADANI PORTS (Mundra)": { 
         "roi": [69.6900, 22.7300, 69.7300, 22.7600], 
@@ -108,7 +112,7 @@ targets = {
         "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, 
         "query": "Jewar Airport status", 
         "desc": "Construction Progress",
-        "ticker": "GMRAIRPORT.NS" # <-- FIXED TICKER
+        "ticker": "GMRAIRPORT.NS"
     },
     "11. BHADLA SOLAR (Energy)": { 
         "roi": [71.9000, 27.5300, 71.9400, 27.5600], 
@@ -129,24 +133,40 @@ targets = {
 # ==========================================
 # 3. HELPER FUNCTIONS
 # ==========================================
+def send_telegram_pdf(filename, summary_text):
+    """Sends the PDF and a summary caption to Telegram"""
+    if not BOT_TOKEN or not CHAT_ID:
+        print("⚠️ Telegram keys missing. Skipping alert.")
+        return
+
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
+    
+    try:
+        with open(filename, 'rb') as f:
+            files = {'document': f}
+            data = {
+                'chat_id': CHAT_ID, 
+                'caption': summary_text, 
+                'parse_mode': 'Markdown'
+            }
+            requests.post(url, data=data, files=files)
+        print("✅ Telegram PDF Sent.")
+    except Exception as e:
+        print(f"❌ Telegram Error: {e}")
+
 def get_valuation_data(ticker):
-    """Fetches live market data and determines valuation status."""
     if not ticker:
         return {"price": "N/A", "pe": "N/A", "change": "N/A", "signal": "N/A", "color": "black"}
     
     try:
         stock = yf.Ticker(ticker)
-        # Using fast_info sometimes is safer for prices, but .info is standard
         info = stock.info 
         
-        # Safe Fetching
         current_price = info.get('currentPrice', 0)
-        if current_price == 0: # Fallback
-             current_price = info.get('regularMarketPreviousClose', 0)
+        if current_price == 0: current_price = info.get('regularMarketPreviousClose', 0)
 
         pe_ratio = info.get('trailingPE', 0)
         
-        # Calculate 1-Month Return
         hist = stock.history(period="1mo")
         if not hist.empty:
             start_price = hist['Close'].iloc[0]
@@ -154,30 +174,35 @@ def get_valuation_data(ticker):
         else:
             change_pct = 0
             
-        # VALUATION LOGIC ENGINE
         signal = "NEUTRAL"
         color = "gray"
+        telegram_icon = "⚪"
         
         if pe_ratio > 0:
             if pe_ratio < 15 and change_pct < 10:
                 signal = "VALUE BUY"
                 color = "green"
+                telegram_icon = "🟢"
             elif pe_ratio > 40:
                 signal = "OVERVALUED"
                 color = "red"
+                telegram_icon = "🔴"
             elif change_pct > 15:
                 signal = "HEATED"
                 color = "orange"
+                telegram_icon = "🟠"
         
         return {
-            "price": f"Rs. {current_price}", # <-- FIXED: No Rupee Symbol
+            "price": f"Rs. {current_price}",
             "pe": f"{pe_ratio:.1f}x",
             "change": f"{change_pct:+.1f}%",
             "signal": signal,
-            "color": color
+            "color": color,
+            "icon": telegram_icon,
+            "ticker_clean": ticker.replace(".NS", "")
         }
     except:
-        return {"price": "Error", "pe": "-", "change": "-", "signal": "Error", "color": "red"}
+        return {"price": "Error", "pe": "-", "change": "-", "signal": "Error", "color": "red", "icon": "⚠️", "ticker_clean": ticker}
 
 def get_satellite_data(coords, vis, filename):
     roi = ee.Geometry.Rectangle(coords)
@@ -203,10 +228,7 @@ def get_market_news(query):
         link = item.get('link', '')
         date = item.get('date', 'Recent')
         if link.startswith("./"): link = f"https://news.google.com{link[1:]}"
-        
-        # Clean Title for PDF (Fix Encoding)
         clean_title = title.encode('ascii', 'ignore').decode('ascii') 
-        
         if "http" in link: news_data.append({'title': clean_title, 'link': link, 'date': date})
     if not news_data:
         safe_link = f"https://www.google.com/search?q={urllib.parse.quote(query)}&tbm=nws"
@@ -232,16 +254,21 @@ html_report = """
         <table style="width:100%; border-collapse: collapse;">
 """
 
+telegram_summary = "🛰️ **Alpha Satellite Dispatch**\n\n"
+
 for i, (name, data) in enumerate(targets.items()):
     print(f"   ...Analyzing: {name}")
     
-    # 1. FETCH DATA
     img_filename = f"sector_{i}.png"
     img_url, has_image = get_satellite_data(data['roi'], data['vis'], img_filename)
     news_items = get_market_news(data['query'])
     val_data = get_valuation_data(data['ticker'])
     
-    # 2. BUILD HTML ROW
+    # Update Telegram Summary if it has a signal
+    if val_data['signal'] != "N/A" and val_data['signal'] != "NEUTRAL":
+        telegram_summary += f"{val_data['icon']} *{val_data['ticker_clean']}*: {val_data['signal']} ({val_data['pe']})\n"
+    
+    # HTML & PDF Building (Same as before)
     news_html = ""
     for n in news_items:
         color = "green" if "ago" in n['date'] else "gray"
@@ -270,34 +297,28 @@ for i, (name, data) in enumerate(targets.items()):
     </tr>
     """
 
-    # 3. BUILD PDF PAGE
     pdf.add_page()
     pdf.set_font("Arial", "B", 16)
-    
-    # Ensure name is PDF safe
     clean_name = name.encode('ascii', 'ignore').decode('ascii')
     pdf.cell(0, 10, f"{clean_name}", ln=True)
-    
-    # Valuation Line in PDF (Using Rs. instead of Symbol)
     pdf.set_font("Arial", "B", 10)
     pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 8, f"Price: {val_data['price']} | P/E: {val_data['pe']} | Signal: {val_data['signal']}", ln=True)
-    
     pdf.set_font("Arial", "", 10)
     pdf.set_text_color(0, 0, 255)
     for n in news_items:
         pdf.cell(0, 8, f"[{n['date']}] {n['title']}", ln=True, link=n['link'])
-    
     pdf.ln(5)
     if has_image: pdf.image(img_filename, x=10, w=190)
 
-# FINALIZE
 html_report += "</table></div></body></html>"
 pdf.output("Financial_Intel_Report.pdf")
 print("✅ Report Generated.")
 
-# SEND EMAIL
-print("📧 Sending Dispatch...")
+# ==========================================
+# 5. DISPATCH (EMAIL + TELEGRAM)
+# ==========================================
+print("📧 Sending Email...")
 msg = EmailMessage()
 msg['Subject'] = f"Supply Chain Alpha +: {datetime.now().strftime('%d %b')}"
 msg['From'] = "Satellite Bot"
@@ -310,4 +331,8 @@ with open("Financial_Intel_Report.pdf", 'rb') as f:
 with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
     smtp.login(EMAIL_USER, EMAIL_PASS)
     smtp.send_message(msg)
-print("✅ Sent.")
+print("✅ Email Sent.")
+
+print("📱 Sending Telegram...")
+telegram_summary += "\n📂 *Full PDF Report Attached below*"
+send_telegram_pdf("Financial_Intel_Report.pdf", telegram_summary)

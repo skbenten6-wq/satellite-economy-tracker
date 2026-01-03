@@ -20,12 +20,10 @@ BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
-# Configure AI - USING THE LATEST PRO MODEL
+# --- AI CONFIGURATION (Gemini 3 Pro) ---
 if GEMINI_KEY:
     try:
         genai.configure(api_key=GEMINI_KEY)
-        # UPDATED MODEL NAME HERE
-        model = genai.GenerativeModel('gemini-1.5-pro')
     except Exception as e:
         print(f"❌ AI Config Error: {e}")
 
@@ -36,26 +34,33 @@ WATCHLIST = [
 ]
 
 def analyze_news_with_ai(symbol, category, headline):
-    """Asks Gemini 1.5 Pro to analyze the news impact."""
+    """Asks Gemini 3 Pro (with fallback) to analyze news."""
     if not GEMINI_KEY: return "⚠️ AI Key Missing"
     
     prompt = (
-        f"Act as a senior market analyst. Analyze this news for Indian stock '{symbol}':\n"
+        f"Analyze this news for Indian stock '{symbol}':\n"
         f"Category: {category}\n"
         f"Headline: {headline}\n\n"
-        "Provide a 1-sentence analysis of the impact on the stock price.\n"
-        "Format:\n"
-        "IMPACT: [BULLISH/BEARISH/NEUTRAL]\n"
-        "INSIGHT: [Your 1-sentence analysis]"
+        "1. Is this BULLISH, BEARISH, or NEUTRAL?\n"
+        "2. Why? (1 short sentence)\n"
+        "Format: IMPACT: [Status]\nINSIGHT: [Reason]"
     )
     
-    try:
-        # Added safety settings to prevent blocking finance talk
-        response = model.generate_content(prompt)
-        return response.text.strip()
-    except Exception as e:
-        print(f"❌ AI Error: {e}")
-        return f"⚠️ Error: {str(e)}"
+    # LIST OF MODELS TO TRY (Priority Order)
+    # 1. Gemini 3 Pro (Most Intelligent)
+    # 2. Gemini 1.5 Flash (Fastest/Stable Backup)
+    models_to_try = ['gemini-3-pro-preview', 'gemini-1.5-flash']
+    
+    for model_name in models_to_try:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            return response.text.strip()
+        except Exception as e:
+            print(f"⚠️ Failed with {model_name}: {e}")
+            continue # Try next model
+            
+    return "⚠️ All AI Models Failed"
 
 def send_telegram_alert(msg):
     if not BOT_TOKEN or not CHAT_ID: return
@@ -80,7 +85,7 @@ def get_nse_data():
         return []
 
 def check_for_fresh_news():
-    print(f"🚀 Scanning NSE (Gemini 1.5 Pro)... [{datetime.now().strftime('%H:%M:%S')}]")
+    print(f"🚀 Scanning NSE (Gemini 3 Pro)... [{datetime.now().strftime('%H:%M:%S')}]")
     data = get_nse_data()
     
     now = datetime.now()
@@ -121,10 +126,10 @@ def check_for_fresh_news():
                     icon = "🟢"
                 elif "BEARISH" in ai_insight.upper():
                     icon = "🔴"
-                elif "Error" in ai_insight:
-                    icon = "⚠️"
-                else:
+                elif "NEUTRAL" in ai_insight.upper():
                     icon = "⚪"
+                else:
+                    icon = "⚠️"
 
                 alert_msg = (
                     f"<b>🚨 {symbol}</b> | {category}\n\n"

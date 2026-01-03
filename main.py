@@ -20,7 +20,7 @@ PROJECT_ID = "satellite-tracker-2026"
 EMAIL_USER = os.environ.get("MAIL_USERNAME")
 EMAIL_PASS = os.environ.get("MAIL_PASSWORD")
 
-# TELEGRAM KEYS (NEW)
+# TELEGRAM KEYS
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
@@ -144,6 +144,7 @@ def send_telegram_pdf(filename, summary_text):
     try:
         with open(filename, 'rb') as f:
             files = {'document': f}
+            # 'caption' supports up to 1024 chars.
             data = {
                 'chat_id': CHAT_ID, 
                 'caption': summary_text, 
@@ -156,7 +157,7 @@ def send_telegram_pdf(filename, summary_text):
 
 def get_valuation_data(ticker):
     if not ticker:
-        return {"price": "N/A", "pe": "N/A", "change": "N/A", "signal": "N/A", "color": "black"}
+        return {"price": "N/A", "pe": "N/A", "change": "N/A", "signal": "N/A", "color": "black", "icon": "⚪", "ticker_clean": "Infra"}
     
     try:
         stock = yf.Ticker(ticker)
@@ -218,21 +219,41 @@ def get_satellite_data(coords, vis, filename):
         except: return url, False
     return None, False
 
+def clean_link(link):
+    if not link: return ""
+    if link.startswith("./"): return f"https://news.google.com{link[1:]}"
+    if link.startswith("articles/"): return f"https://news.google.com/{link}"
+    return link
+
 def get_market_news(query):
     googlenews.clear()
     googlenews.search(query)
     results = googlenews.result()
     news_data = []
+    
     for item in results[:2]:
         title = item.get('title', '')
-        link = item.get('link', '')
+        link = clean_link(item.get('link', ''))
         date = item.get('date', 'Recent')
-        if link.startswith("./"): link = f"https://news.google.com{link[1:]}"
+        
         clean_title = title.encode('ascii', 'ignore').decode('ascii') 
-        if "http" in link: news_data.append({'title': clean_title, 'link': link, 'date': date})
+        
+        # GENERATE BACKUP SEARCH LINK
+        search_query = urllib.parse.quote(clean_title)
+        search_link = f"https://www.google.com/search?q={search_query}"
+        
+        if "http" in link: 
+            news_data.append({
+                'title': clean_title, 
+                'link': link, 
+                'search_link': search_link,
+                'date': date
+            })
+            
     if not news_data:
         safe_link = f"https://www.google.com/search?q={urllib.parse.quote(query)}&tbm=nws"
-        news_data.append({'title': "No fresh news. Click to Search.", 'link': safe_link, 'date': "N/A"})
+        news_data.append({'title': "No fresh news. Click to Search.", 'link': safe_link, 'search_link': safe_link, 'date': "N/A"})
+        
     return news_data
 
 # ==========================================
@@ -254,6 +275,7 @@ html_report = """
         <table style="width:100%; border-collapse: collapse;">
 """
 
+# STARTING TELEGRAM SUMMARY
 telegram_summary = "🛰️ **Alpha Satellite Dispatch**\n\n"
 
 for i, (name, data) in enumerate(targets.items()):
@@ -264,15 +286,23 @@ for i, (name, data) in enumerate(targets.items()):
     news_items = get_market_news(data['query'])
     val_data = get_valuation_data(data['ticker'])
     
-    # Update Telegram Summary if it has a signal
-    if val_data['signal'] != "N/A" and val_data['signal'] != "NEUTRAL":
+    # TELEGRAM: ADD EVERYONE (No filtering)
+    if val_data['ticker_clean']:
         telegram_summary += f"{val_data['icon']} *{val_data['ticker_clean']}*: {val_data['signal']} ({val_data['pe']})\n"
-    
-    # HTML & PDF Building (Same as before)
+    else:
+        telegram_summary += f"📡 *{name.split()[1]}*: Monitoring\n"
+
+    # HTML REPORT (With Dual Links)
     news_html = ""
     for n in news_items:
         color = "green" if "ago" in n['date'] else "gray"
-        news_html += f"<div style='margin-bottom:4px; font-size:11px;'><span style='color:{color};'>[{n['date']}]</span> <a href='{n['link']}' style='text-decoration:none; color:#2980b9;'>{n['title']}</a></div>"
+        news_html += (
+            f"<div style='margin-bottom:6px; font-size:11px;'>"
+            f"<span style='color:{color};'>[{n['date']}]</span> "
+            f"<a href='{n['link']}' style='text-decoration:none; color:#2980b9; font-weight:bold;'>{n['title']}</a> "
+            f"<span style='font-size:9px;'>[<a href='{n['search_link']}' style='color:#7f8c8d;'>Backup Search</a>]</span>"
+            f"</div>"
+        )
 
     html_report += f"""
     <tr style="border-bottom: 1px solid #eee;">
@@ -297,6 +327,7 @@ for i, (name, data) in enumerate(targets.items()):
     </tr>
     """
 
+    # PDF REPORT (With Backup Link below title)
     pdf.add_page()
     pdf.set_font("Arial", "B", 16)
     clean_name = name.encode('ascii', 'ignore').decode('ascii')
@@ -304,10 +335,19 @@ for i, (name, data) in enumerate(targets.items()):
     pdf.set_font("Arial", "B", 10)
     pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 8, f"Price: {val_data['price']} | P/E: {val_data['pe']} | Signal: {val_data['signal']}", ln=True)
+    
     pdf.set_font("Arial", "", 10)
-    pdf.set_text_color(0, 0, 255)
     for n in news_items:
-        pdf.cell(0, 8, f"[{n['date']}] {n['title']}", ln=True, link=n['link'])
+        pdf.set_text_color(0, 0, 255)
+        # Primary Link
+        pdf.cell(0, 6, f"[{n['date']}] {n['title']}", ln=True, link=n['link'])
+        
+        # Backup Link (Indented, Grey)
+        pdf.set_text_color(100, 100, 100)
+        pdf.set_font("Arial", "I", 8)
+        pdf.cell(0, 6, f"   [Backup Google Search]", ln=True, link=n['search_link'])
+        pdf.set_font("Arial", "", 10)
+        
     pdf.ln(5)
     if has_image: pdf.image(img_filename, x=10, w=190)
 

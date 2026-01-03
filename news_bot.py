@@ -18,12 +18,15 @@ HEADERS = {
 # SECRETS
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY") # New Secret
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
-# Configure AI
+# Configure AI (Switched to standard 'gemini-pro' for stability)
 if GEMINI_KEY:
-    genai.configure(api_key=GEMINI_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    try:
+        genai.configure(api_key=GEMINI_KEY)
+        model = genai.GenerativeModel('gemini-pro')
+    except Exception as e:
+        print(f"❌ AI Config Error: {e}")
 
 WATCHLIST = [
     "Resignation", "Appointment", "Dividend", "Bonus", 
@@ -33,7 +36,7 @@ WATCHLIST = [
 
 def analyze_news_with_ai(symbol, category, headline):
     """Asks Gemini to analyze the news impact."""
-    if not GEMINI_KEY: return "AI Analysis Unavailable"
+    if not GEMINI_KEY: return "⚠️ AI Key Missing"
     
     prompt = (
         f"Act as a hedge fund analyst. Analyze this news for Indian stock '{symbol}':\n"
@@ -47,8 +50,10 @@ def analyze_news_with_ai(symbol, category, headline):
     try:
         response = model.generate_content(prompt)
         return response.text.strip()
-    except:
-        return "⚠️ AI Analysis Failed"
+    except Exception as e:
+        # RETURN THE REAL ERROR TO TELEGRAM
+        print(f"❌ AI Error: {e}")
+        return f"⚠️ Error: {str(e)}"
 
 def send_telegram_alert(msg):
     if not BOT_TOKEN or not CHAT_ID: return
@@ -73,7 +78,7 @@ def get_nse_data():
         return []
 
 def check_for_fresh_news():
-    print(f"🚀 Scanning NSE (V5.0 AI Analyst)... [{datetime.now().strftime('%H:%M:%S')}]")
+    print(f"🚀 Scanning NSE (V5.1 Debug)... [{datetime.now().strftime('%H:%M:%S')}]")
     data = get_nse_data()
     
     now = datetime.now()
@@ -94,7 +99,7 @@ def check_for_fresh_news():
             raw_headline = (item.get('caption') or item.get('subject') or item.get('remarks') or category)
             headline = raw_headline.strip() if raw_headline else "Details N/A"
             
-            # --- LINK LOGIC ---
+            # Link Logic
             attachment = item.get('attchmntText')
             if item.get('series') in ['SM', 'ST', 'SME', 'SY']:
                 pdf_link = f"{URL_SME}{attachment}"
@@ -106,15 +111,16 @@ def check_for_fresh_news():
             
             if any(k.lower() in full_text.lower() for k in WATCHLIST):
                 
-                # --- AI ANALYSIS STEP ---
                 print(f"🧠 Analyzing {symbol}...")
                 ai_insight = analyze_news_with_ai(symbol, category, headline)
                 
-                # Formatting the Insight
+                # Dynamic Icon
                 if "BULLISH" in ai_insight.upper():
                     icon = "🟢"
                 elif "BEARISH" in ai_insight.upper():
                     icon = "🔴"
+                elif "Error" in ai_insight:
+                    icon = "⚠️"
                 else:
                     icon = "⚪"
 

@@ -7,7 +7,8 @@ import google.generativeai as genai
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from watchlist_manager import load_watchlist, add_to_dynamic, remove_from_dynamic
-from paper_trader import get_portfolio_status  # IMPORTING THE LEDGER
+from paper_trader import get_portfolio_status
+from market_memory import load_memory  # NEW: Importing the Brain
 
 # --- CONFIGURATION ---
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -86,7 +87,9 @@ def run_full_scan(ticker):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
-        "🤖 **COMMAND CENTER V3**\n\n"
+        "🤖 **COMMAND CENTER V3.5**\n\n"
+        "🧠 **INTELLIGENCE:**\n"
+        "/intel - 📡 View Market Memory\n\n"
         "💼 **TRADING DESK:**\n"
         "/portfolio - 💰 View Ghost Ledger\n"
         "/check <STOCK> - 🔍 Instant Analysis\n\n"
@@ -102,7 +105,35 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
-# --- PAPER TRADING HANDLER ---
+# --- BRAIN & LEDGER HANDLERS ---
+
+async def cmd_intel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Shows what the AI Brain currently knows about the market"""
+    mem = load_memory()
+    
+    trend = mem.get("global_trend", "NEUTRAL")
+    sentiments = mem.get("stock_sentiment", {})
+    
+    # Format the Trend Icon
+    trend_icon = "⚪"
+    if trend == "BULLISH": trend_icon = "🟢"
+    elif trend == "BEARISH": trend_icon = "🔴"
+    
+    msg = (
+        f"🧠 **MARKET INTELLIGENCE**\n\n"
+        f"🌍 **Global Regime:** {trend_icon} {trend}\n\n"
+        f"📡 **Stock Sentiment:**\n"
+    )
+    
+    if sentiments:
+        for ticker, sentiment in sentiments.items():
+            icon = "🟢" if sentiment == "POSITIVE" else "🔴"
+            msg += f"• {ticker}: {icon} {sentiment}\n"
+    else:
+        msg += "• No satellite data recorded yet.\n"
+        
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
 async def cmd_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     report = get_portfolio_status()
     await update.message.reply_text(report, parse_mode="Markdown")
@@ -160,7 +191,8 @@ if __name__ == "__main__":
     
     app.add_handler(CommandHandler("start", start))
     
-    # Paper Trading
+    # Intelligence & Ledger
+    app.add_handler(CommandHandler("intel", cmd_intel))
     app.add_handler(CommandHandler("portfolio", cmd_portfolio))
     
     # Remote Controls
@@ -175,5 +207,5 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("del", del_stock))
     app.add_handler(CommandHandler("check", check_stock))
     
-    print("🤖 Commander V3 Active...")
+    print("🤖 Commander V3.5 Active...")
     app.run_polling()

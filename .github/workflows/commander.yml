@@ -8,7 +8,7 @@ on:
 jobs:
   listen-for-commands:
     runs-on: ubuntu-latest
-    timeout-minutes: 350  # Run for nearly 6 hours
+    timeout-minutes: 350
 
     steps:
       - name: Checkout Code
@@ -17,10 +17,9 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.12' # UPGRADED from 3.10 to 3.12
+          python-version: '3.12' # UPGRADED TO 3.12 (Fixes pandas_ta error)
 
       - name: Install Libraries
-        # We upgrade pip first to ensure no installation glitches
         run: |
           python -m pip install --upgrade pip
           pip install requests yfinance pandas_ta google-generativeai python-telegram-bot

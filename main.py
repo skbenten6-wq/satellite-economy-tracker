@@ -3,8 +3,10 @@ import geemap
 import os
 import requests
 import json
+import time
 from datetime import datetime, timedelta
 from fpdf import FPDF
+from GoogleNews import GoogleNews
 from market_memory import update_stock_sentiment
 
 # --- CONFIGURATION ---
@@ -35,10 +37,9 @@ try:
 except Exception as e:
     print(f"⚠️ Earth Engine Auth Failed: {e}")
 
-# --- ANALYSIS FUNCTIONS ---
+# --- 1. SATELLITE ANALYSIS ---
 def analyze_location(name, info):
-    if not EE_READY:
-        return "NEUTRAL", "Auth Failed - Check EE_KEY", None
+    if not EE_READY: return "NEUTRAL", "Auth Failed", None
 
     try:
         # Get Sentinel-2 Data
@@ -52,17 +53,17 @@ def analyze_location(name, info):
             
         clouds = image.get('CLOUDY_PIXEL_PERCENTAGE').getInfo()
         
-        # --- NEW: DOWNLOAD THUMBNAIL ---
-        image_file = f"{name}.jpg"
+        # Download Thumbnail (Fixed)
+        image_file = f"{name}.png" # Changed to PNG for better PDF support
         try:
-            # Visualize True Color (B4=Red, B3=Green, B2=Blue)
-            vis_params = {'min': 0, 'max': 3000, 'bands': ['B4', 'B3', 'B2'], 'dimensions': 600}
+            # Visualize True Color
+            vis_params = {'min': 0, 'max': 3000, 'bands': ['B4', 'B3', 'B2'], 'dimensions': 600, 'format': 'png'}
             thumb_url = image.getThumbURL(vis_params)
             img_data = requests.get(thumb_url).content
             with open(image_file, 'wb') as f:
                 f.write(img_data)
         except Exception as e:
-            print(f"⚠️ Could not download image for {name}: {e}")
+            print(f"⚠️ Image Download Failed: {e}")
             image_file = None
 
         sentiment = "POSITIVE" if clouds < 20 else "NEUTRAL"
@@ -74,11 +75,28 @@ def analyze_location(name, info):
         print(f"Error analyzing {name}: {e}")
         return "NEUTRAL", "Satellite Error", None
 
-# --- PDF REPORT GENERATION ---
+# --- 2. NEWS HUNTER ---
+def get_company_news(ticker):
+    """Fetches top 3 headlines for the company"""
+    try:
+        googlenews = GoogleNews(period='3d')
+        googlenews.search(ticker)
+        results = googlenews.result()
+        headlines = []
+        if results:
+            for item in results[:3]: # Get top 3
+                # clean text to avoid PDF unicode errors
+                clean_title = item['title'].encode('latin-1', 'ignore').decode('latin-1')
+                headlines.append(f"- {clean_title}")
+        return headlines
+    except:
+        return ["No recent news found."]
+
+# --- 3. PDF REPORT GENERATION ---
 class PDFReport(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 15)
-        self.cell(0, 10, 'SATELLITE INTELLIGENCE DISPATCH', 0, 1, 'C')
+        self.cell(0, 10, 'SATELLITE & NEWS INTELLIGENCE', 0, 1, 'C')
         self.ln(5)
 
 def create_and_send_report(results):
@@ -90,24 +108,33 @@ def create_and_send_report(results):
     pdf.ln(5)
     
     for ticker, data in results.items():
-        pdf.set_font("Arial", 'B', 12)
-        pdf.cell(0, 10, f"TARGET: {ticker} ({data['type']})", 0, 1)
-        pdf.set_font("Arial", size=10)
-        pdf.cell(0, 10, f"Sentiment: {data['sentiment']}", 0, 1)
-        pdf.cell(0, 10, f"Status: {data['details']}", 0, 1)
+        # TITLE
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(0, 10, f"{ticker} ({data['type']})", 0, 1)
         
-        # EMBED IMAGE IF EXISTS
-        if data['image']:
+        # DATA
+        pdf.set_font("Arial", size=11)
+        pdf.cell(0, 8, f"Sentiment: {data['sentiment']}", 0, 1)
+        pdf.cell(0, 8, f"Status: {data['details']}", 0, 1)
+        
+        # IMAGE
+        if data['image'] and os.path.exists(data['image']):
             try:
-                # Add image (x=10, width=100)
                 pdf.image(data['image'], x=10, y=pdf.get_y(), w=100)
-                pdf.ln(60) # Move down past image
+                pdf.ln(65) # Move cursor down past image
             except:
                 pdf.cell(0, 10, "[Image Render Failed]", 0, 1)
         else:
             pdf.ln(5)
+
+        # NEWS SECTION
+        pdf.set_font("Arial", 'B', 11)
+        pdf.cell(0, 8, "Recent Intel:", 0, 1)
+        pdf.set_font("Arial", size=9)
+        for news in data['news']:
+            pdf.multi_cell(0, 5, news)
             
-        pdf.ln(5) # Spacing
+        pdf.ln(10) # Spacing between stocks
         
     filename = "satellite_report.pdf"
     pdf.output(filename)
@@ -116,11 +143,11 @@ def create_and_send_report(results):
         with open(filename, 'rb') as f:
             requests.post(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument",
-                data={"chat_id": CHAT_ID, "caption": "🛰️ **Sector Scan Complete**\nBrain updated."},
+                data={"chat_id": CHAT_ID, "caption": "🛰️ **Full Intel Report**\nSatellite + News Analysis Complete."},
                 files={"document": f}
             )
 
-# --- MEMORY SYNC ---
+# --- 4. MEMORY SYNC ---
 def commit_memory_to_github():
     try:
         os.system('git config --global user.email "bot@github.com"')
@@ -132,17 +159,29 @@ def commit_memory_to_github():
     except Exception as e:
         print(f"⚠️ Brain Sync Failed: {e}")
 
+# --- MAIN EXECUTION ---
 if __name__ == "__main__":
-    print("🛰️ Starting Orbital Scan...")
+    print("🛰️ Starting Hybrid Scan...")
     scan_results = {}
     
     for ticker, info in TARGETS.items():
         print(f"Scanning {ticker}...")
+        
+        # 1. Get Satellite Data
         sentiment, details, img_path = analyze_location(ticker, info)
+        
+        # 2. Get News Data
+        news = get_company_news(ticker)
+        
         scan_results[ticker] = {
-            "sentiment": sentiment, "details": details, 
-            "type": info['type'], "image": img_path
+            "sentiment": sentiment, 
+            "details": details, 
+            "type": info['type'], 
+            "image": img_path,
+            "news": news
         }
+        
+        # 3. Update Brain
         update_stock_sentiment(ticker, sentiment)
 
     create_and_send_report(scan_results)

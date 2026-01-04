@@ -8,7 +8,6 @@ from fpdf import FPDF
 from market_memory import update_stock_sentiment # Import the Brain
 
 # --- CONFIGURATION ---
-# We map locations to specific stocks
 TARGETS = {
     "TATASTEEL": {"coords": [86.18, 22.75], "type": "Mine"}, # Jamshedpur/Noamundi
     "ADANIPORTS": {"coords": [69.70, 22.75], "type": "Port"}, # Mundra
@@ -21,7 +20,6 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 # --- AUTHENTICATION ---
 try:
-    # Decode the base64 secret key for Earth Engine
     import base64
     service_account = os.environ.get("EE_KEY")
     if service_account:
@@ -35,41 +33,28 @@ except Exception as e:
 
 # --- ANALYSIS FUNCTIONS ---
 def analyze_location(name, info):
-    """
-    Real satellite analysis is complex. 
-    For this 'Ghost Ledger' simulation, we will assume:
-    - If we get a clear image without clouds, Activity = POSITIVE.
-    - If it's cloudy or data is missing, Activity = NEUTRAL.
-    """
     try:
-        # Get Sentinel-2 Data (High Resolution)
         collection = (ee.ImageCollection('COPERNICUS/S2_SR')
                       .filterBounds(ee.Geometry.Point(info['coords']))
                       .filterDate(datetime.now() - timedelta(days=5), datetime.now())
                       .sort('CLOUDY_PIXEL_PERCENTAGE'))
         
         image = collection.first()
-        
-        if not image:
-            return "NEUTRAL", "Cloudy/No Data"
+        if not image: return "NEUTRAL", "Cloudy/No Data"
             
-        # Check Cloud Cover metadata
         clouds = image.get('CLOUDY_PIXEL_PERCENTAGE').getInfo()
         
-        if clouds < 20:
-            # Clear view of the mine/port = High Visibility = Good for business
-            return "POSITIVE", f"Clear View (Clouds: {clouds:.1f}%)"
-        else:
-            return "NEUTRAL", f"Obstructed (Clouds: {clouds:.1f}%)"
-            
+        if clouds < 20: return "POSITIVE", f"Clear View (Clouds: {clouds:.1f}%)"
+        else: return "NEUTRAL", f"Obstructed (Clouds: {clouds:.1f}%)"
     except:
         return "NEUTRAL", "Satellite Error"
 
-# --- PDF REPORT GENERATION ---
+# --- PDF REPORT GENERATION (NO EMOJIS ALLOWED HERE) ---
 class PDFReport(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 15)
-        self.cell(0, 10, '🛰️ SATELLITE INTELLIGENCE DISPATCH', 0, 1, 'C')
+        # REMOVED THE EMOJI FROM THIS LINE
+        self.cell(0, 10, 'SATELLITE INTELLIGENCE DISPATCH', 0, 1, 'C')
         self.ln(5)
 
 def create_and_send_report(results):
@@ -84,6 +69,7 @@ def create_and_send_report(results):
         pdf.set_font("Arial", 'B', 12)
         pdf.cell(0, 10, f"TARGET: {ticker} ({data['type']})", 0, 1)
         pdf.set_font("Arial", size=10)
+        # Ensure raw strings are used, no special chars
         pdf.cell(0, 10, f"Sentiment: {data['sentiment']}", 0, 1)
         pdf.cell(0, 10, f"Status: {data['details']}", 0, 1)
         pdf.ln(5)
@@ -91,7 +77,7 @@ def create_and_send_report(results):
     filename = "satellite_report.pdf"
     pdf.output(filename)
     
-    # Send to Telegram
+    # Send to Telegram (Emojis are fine here!)
     if BOT_TOKEN and CHAT_ID:
         with open(filename, 'rb') as f:
             requests.post(
@@ -102,7 +88,6 @@ def create_and_send_report(results):
 
 # --- MEMORY SYNC ---
 def commit_memory_to_github():
-    """Saves the updated brain back to the cloud"""
     try:
         os.system('git config --global user.email "bot@github.com"')
         os.system('git config --global user.name "Satellite Bot"')
@@ -116,7 +101,6 @@ def commit_memory_to_github():
 # --- MAIN EXECUTION ---
 if __name__ == "__main__":
     print("🛰️ Starting Orbital Scan...")
-    
     scan_results = {}
     
     for ticker, info in TARGETS.items():
@@ -127,8 +111,5 @@ if __name__ == "__main__":
         update_stock_sentiment(ticker, sentiment)
         print(f"✅ {ticker}: {sentiment}")
 
-    # Generate PDF & Alert User
     create_and_send_report(scan_results)
-    
-    # Save Brain to Cloud
     commit_memory_to_github()

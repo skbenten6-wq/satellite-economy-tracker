@@ -1,9 +1,9 @@
 {
     "global_trend": "BULLISH",
     "stock_sentiment": {
-        "TATASTEEL.NS": "NEUTRAL",
-        "ADANIPORTS.NS": "NEUTRAL",
-        "ULTRACEMCO.NS": "NEUTRAL",
-        "RELIANCE.NS": "NEUTRAL"
+        "TATASTEEL.NS": "POSITIVE",
+        "ADANIPORTS.NS": "POSITIVE",
+        "ULTRACEMCO.NS": "POSITIVE",
+        "RELIANCE.NS": "POSITIVE"
     }
 }

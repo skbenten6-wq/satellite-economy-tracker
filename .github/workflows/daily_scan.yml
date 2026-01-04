@@ -24,7 +24,7 @@ jobs:
           python-version: '3.10'
 
       - name: Install Libraries
-        # Installs ALL required tools
+        # 👇 I ADDED 'GoogleNews' TO THIS LIST
         run: pip install earthengine-api geemap requests GoogleNews fpdf yfinance
 
       - name: Run Intelligence Script

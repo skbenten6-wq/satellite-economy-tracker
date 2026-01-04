@@ -1,6 +1,7 @@
 import os
 import json
 import ee
+import base64 # <--- ADDED THIS
 import requests
 import urllib.request
 import urllib.parse
@@ -11,7 +12,7 @@ from fpdf import FPDF
 import yfinance as yf
 
 # ==========================================
-# 1. CONFIGURATION & AUTH
+# 1. CONFIGURATION & AUTH (FIXED)
 # ==========================================
 PROJECT_ID = "satellite-tracker-2026"
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -19,17 +20,21 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 try:
     if os.environ.get("EE_KEY"):
-        service_account_info = json.loads(os.environ["EE_KEY"])
+        # 👇 DECODE THE BASE64 KEY FIRST
+        key_data = base64.b64decode(os.environ.get("EE_KEY")).decode('utf-8')
+        service_account_info = json.loads(key_data)
+        
         credentials = Credentials.from_service_account_info(
             service_account_info, 
             scopes=['https://www.googleapis.com/auth/earthengine']
         )
         ee.Initialize(credentials=credentials, project=PROJECT_ID)
+        print("✅ [SYSTEM] Satellite Connection Established")
     else:
         ee.Initialize(project=PROJECT_ID)
-    print("✅ [SYSTEM] Satellite Connection Established")
 except Exception as e:
     print(f"❌ [CRITICAL] Auth Failed: {e}")
+    # We continue so we can still send Financials even if Satellite fails
     pass
 
 googlenews = GoogleNews(period='2d') 
@@ -37,33 +42,33 @@ googlenews.set_lang('en')
 googlenews.set_encode('utf-8')
 
 # ==========================================
-# 2. TARGET LIST (YOUR ORIGINAL LIST)
+# 2. TARGET LIST (Smart Band Logic)
 # ==========================================
 targets = {
     "1. COAL INDIA (Gevra Mine)": { 
         "roi": [82.5600, 22.3100, 82.6000, 22.3500], 
-        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, 
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, # SWIR for Heat/Dust
         "query": "Coal India production", 
-        "desc": "Pit Expansion",
+        "desc": "Pit Expansion (SWIR)",
         "ticker": "COALINDIA.NS" 
     },
     "2. NMDC (Bailadila Iron)": { 
         "roi": [81.2000, 18.6600, 81.2400, 18.7000], 
-        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, 
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, # SWIR for Red Ore
         "query": "NMDC iron ore prices", 
-        "desc": "Red Ore Piles",
+        "desc": "Red Ore Piles (SWIR)",
         "ticker": "NMDC.NS" 
     },
     "3. RELIANCE (Oil Storage)": { 
         "roi": [69.8300, 22.3300, 69.9100, 22.3800], 
-        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, 
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, # SWIR for Tanks
         "query": "Crude oil inventory India", 
-        "desc": "Tank Farm Levels",
+        "desc": "Tank Farm Levels (SWIR)",
         "ticker": "RELIANCE.NS" 
     },
     "4. TATA STEEL (Jamshedpur)": { 
         "roi": [86.1950, 22.7950, 86.2050, 22.8050], 
-        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, 
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, # SWIR for Furnace
         "query": "Tata Steel India production", 
         "desc": "Blast Furnace Heat",
         "ticker": "TATASTEEL.NS" 
@@ -77,51 +82,51 @@ targets = {
     },
     "6. ULTRATECH (Aditya Cement)": { 
         "roi": [74.6000, 24.7800, 74.6400, 24.8200], 
-        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, 
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, 
         "query": "Cement demand India", 
-        "desc": "Grey Dust & Quarry",
-        "ticker": "ULTRATECH.NS" 
+        "desc": "Quarry Activity",
+        "ticker": "ULTRACEMCO.NS"  # <--- FIXED TICKER
     },
     "7. ADANI PORTS (Mundra)": { 
         "roi": [69.6900, 22.7300, 69.7300, 22.7600], 
-        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, 
+        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}, # NIR for Water
         "query": "Adani Ports cargo volume", 
-        "desc": "Ships at Dock",
+        "desc": "Ships at Dock (NIR)",
         "ticker": "ADANIPORTS.NS" 
     },
     "8. CONCOR (Delhi Depot)": { 
         "roi": [77.2880, 28.5200, 77.2980, 28.5300], 
-        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, 
+        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, # RGB for Containers
         "query": "Container Corp volume", 
         "desc": "Container Density",
         "ticker": "CONCOR.NS" 
     },
     "9. MARUTI (Manesar Yard)": { 
         "roi": [76.9300, 28.3500, 76.9400, 28.3600], 
-        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, 
+        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, # RGB for Cars
         "query": "Maruti Suzuki sales", 
         "desc": "Car Inventory",
         "ticker": "MARUTI.NS" 
     },
     "10. JEWAR AIRPORT (Const.)": { 
         "roi": [77.6000, 28.1600, 77.6400, 28.1900], 
-        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, 
+        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}, # NIR for Dirt
         "query": "Jewar Airport status", 
         "desc": "Construction Progress",
         "ticker": "GMRINFRA.NS" 
     },
     "11. BHADLA SOLAR (Energy)": { 
         "roi": [71.9000, 27.5300, 71.9400, 27.5600], 
-        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, 
+        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}, 
         "query": "India solar capacity", 
         "desc": "Panel Expansion",
         "ticker": None 
     },
     "12. BHAKRA DAM (Hydro)": { 
         "roi": [76.4100, 31.3900, 76.4500, 31.4200], 
-        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}, 
+        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}, # NIR for Water Level
         "query": "Monsoon rainfall India", 
-        "desc": "Water Level",
+        "desc": "Water Level (NIR)",
         "ticker": None 
     }
 }
@@ -130,7 +135,6 @@ targets = {
 # 3. HELPER FUNCTIONS
 # ==========================================
 def get_valuation_data(ticker):
-    """Fetches live market data"""
     if not ticker: return {"price": "N/A", "pe": "N/A", "signal": "N/A"}
     try:
         stock = yf.Ticker(ticker)
@@ -158,7 +162,6 @@ def get_valuation_data(ticker):
 def get_satellite_data(coords, vis, filename):
     try:
         roi = ee.Geometry.Rectangle(coords)
-        # Dynamic Date: Look back 45 days for better chance of clear image
         end_date = datetime.now()
         start_date = end_date - timedelta(days=45)
         

@@ -2,8 +2,12 @@ name: Daily Satellite Scan
 
 on:
   schedule:
-    - cron: '30 2 * * *' # 2:30 UTC = 8:00 AM IST
-  workflow_dispatch:      # Manual Trigger
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+
+# 👇 ADD THIS BLOCK 👇
+permissions:
+  contents: write
 
 jobs:
   run-intelligence:
@@ -12,6 +16,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GH_PAT }} # Use your PAT for push access
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -19,14 +25,12 @@ jobs:
           python-version: '3.10'
 
       - name: Install Libraries
-        run: |
-          pip install earthengine-api geemap matplotlib pillow google-auth requests GoogleNews fpdf yfinance
+        # We need 'fpdf' for reports and 'earthengine-api'
+        run: pip install earthengine-api geemap fpdf requests
 
       - name: Run Intelligence Script
         env:
           EE_KEY: ${{ secrets.EE_KEY }}
-          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
-          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py

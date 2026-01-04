@@ -8,8 +8,7 @@ from fpdf import FPDF
 from GoogleNews import GoogleNews
 from market_memory import update_stock_sentiment
 
-# --- 1. THE STRATEGIC TARGET LIST (12 LOCATIONS) ---
-# Precise coordinates for Mines, Yards, Ports, and Infrastructure
+# --- 1. STRATEGIC TARGETS (12 LOCATIONS) ---
 TARGETS = {
     "COALINDIA": {
         "coords": [82.58, 22.33], "type": "Gevra Mine", "ticker": "COALINDIA.NS"
@@ -69,12 +68,12 @@ try:
 except Exception as e:
     print(f"⚠️ Earth Engine Auth Failed: {e}")
 
-# --- 2. SATELLITE IMAGING (JPG Mode) ---
+# --- 2. SATELLITE IMAGING (RESTORED INFRARED BANDS) ---
 def analyze_location(name, info):
     if not EE_READY: return "NEUTRAL", "Auth Failed", None
 
     try:
-        # We search a wider date range to ensure we find a non-cloudy image
+        # Search for clear images in the last 25 days
         collection = (ee.ImageCollection('COPERNICUS/S2_SR')
                       .filterBounds(ee.Geometry.Point(info['coords']))
                       .filterDate(datetime.now() - timedelta(days=25), datetime.now())
@@ -85,11 +84,21 @@ def analyze_location(name, info):
             
         clouds = image.get('CLOUDY_PIXEL_PERCENTAGE').getInfo()
         
-        # Download High-Res Thumbnail (JPG format is safer for PDF)
+        # --- THE FIX: USE FALSE COLOR INFRARED (B8, B4, B3) ---
+        # B8 = Near Infrared (Highlights Vegetation/Heat) -> Mapped to Red
+        # B4 = Red -> Mapped to Green
+        # B3 = Green -> Mapped to Blue
+        # This creates the high-contrast "Professional" look.
+        
         image_file = f"{name.replace(' ', '_')}.jpg"
         try:
-            # Bands 4,3,2 = True Color (Red, Green, Blue)
-            vis_params = {'min': 0, 'max': 3000, 'bands': ['B4', 'B3', 'B2'], 'dimensions': 800, 'format': 'jpg'}
+            vis_params = {
+                'min': 0, 
+                'max': 3000, 
+                'bands': ['B8', 'B4', 'B3'], # <--- RESTORED BANDS
+                'dimensions': 800, 
+                'format': 'jpg'
+            }
             thumb_url = image.getThumbURL(vis_params)
             img_data = requests.get(thumb_url).content
             with open(image_file, 'wb') as f:
@@ -106,27 +115,27 @@ def analyze_location(name, info):
         print(f"Error analyzing {name}: {e}")
         return "NEUTRAL", "Satellite Error", None
 
-# --- 3. FINANCIAL INTELLIGENCE ---
+# --- 3. FINANCIAL INTELLIGENCE (RESTORED LINKS) ---
 def get_financial_intel(ticker):
     data = {"price": "N/A", "pe": "N/A", "signal": "N/A", "news": []}
     
-    if not ticker: return data # Skip for Dams/Airports
+    if not ticker: return data 
 
-    # A. Get Price & PE
+    # A. Price & PE
     try:
         stock = yf.Ticker(ticker)
         hist = stock.history(period="1d")
         if not hist.empty:
             data["price"] = f"Rs. {hist['Close'].iloc[-1]:.1f}"
-            data["pe"] = f"{stock.info.get('trailingPE', 0):.1f}x"
-            # Simple PE Signal
             pe = stock.info.get('trailingPE', 0)
+            data["pe"] = f"{pe:.1f}x"
+            
             if pe > 0 and pe < 15: data["signal"] = "UNDERVALUED"
             elif pe > 40: data["signal"] = "OVERVALUED"
             else: data["signal"] = "NEUTRAL"
     except: pass
 
-    # B. Get News
+    # B. News (Restored Links)
     try:
         googlenews = GoogleNews(period='3d')
         googlenews.search(ticker.replace(".NS",""))
@@ -135,13 +144,14 @@ def get_financial_intel(ticker):
             for item in results[:2]:
                 title = item['title'].encode('latin-1', 'ignore').decode('latin-1')
                 date = item.get('date', 'Recent')
-                data["news"].append(f"[{date}] {title}")
+                # Restored the [Backup Google Search] text line
+                data["news"].append(f"[{date}] {title}\n [Backup Google Search]")
     except:
         data["news"].append("No recent news found.")
         
     return data
 
-# --- 4. PDF GENERATOR (Original Layout) ---
+# --- 4. PDF GENERATOR ---
 class PDFReport(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 14)
@@ -158,34 +168,34 @@ def create_and_send_report(results):
     pdf.ln(5)
     
     for i, (name, data) in enumerate(results.items(), 1):
-        # 1. Image First (Big & Clear)
+        # 1. Image
         if data['image'] and os.path.exists(data['image']):
             pdf.image(data['image'], x=10, y=pdf.get_y(), w=190, h=100)
-            pdf.ln(105) # Move cursor down
+            pdf.ln(105) 
         
         # 2. Header
         pdf.set_font("Arial", 'B', 12)
         pdf.cell(0, 8, f"{i}. {name} ({data['type']})", 0, 1)
         
-        # 3. Financial Data Line
+        # 3. Data
         pdf.set_font("Arial", 'B', 10)
         fin = data['fin']
         line = f"Price: {fin['price']} | P/E: {fin['pe']} | Signal: {fin['signal']}"
         pdf.cell(0, 8, line, 0, 1)
         
-        # 4. News Items
+        # 4. News
         pdf.set_font("Arial", size=9)
         if fin['news']:
             for news in fin['news']:
                 pdf.multi_cell(0, 5, news)
                 pdf.ln(1)
         
-        # 5. Satellite Status
-        pdf.set_text_color(100, 100, 100) # Grey for technical status
+        # 5. Status
+        pdf.set_text_color(100, 100, 100)
         pdf.cell(0, 6, f"Sat Status: {data['details']}", 0, 1)
-        pdf.set_text_color(0, 0, 0) # Reset color
+        pdf.set_text_color(0, 0, 0)
         
-        pdf.ln(10) # Space between targets
+        pdf.ln(10)
 
     filename = "Financial_Intel_Report.pdf"
     pdf.output(filename)
@@ -198,7 +208,7 @@ def create_and_send_report(results):
                 files={"document": f}
             )
 
-# --- 5. EXECUTION LOOP ---
+# --- 5. EXECUTION ---
 def commit_memory():
     try:
         os.system('git config --global user.email "bot@github.com"')
@@ -215,10 +225,10 @@ if __name__ == "__main__":
     for name, info in TARGETS.items():
         print(f"Scanning {name}...")
         
-        # 1. Satellite Analysis
+        # 1. Satellite
         sentiment, details, img = analyze_location(name, info)
         
-        # 2. Financial Analysis
+        # 2. Financial
         fin_data = get_financial_intel(info['ticker'])
         
         scan_results[name] = {

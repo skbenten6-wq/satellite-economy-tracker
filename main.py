@@ -3,7 +3,6 @@ import geemap
 import os
 import requests
 import json
-import time
 from datetime import datetime, timedelta
 from fpdf import FPDF
 from GoogleNews import GoogleNews
@@ -53,11 +52,11 @@ def analyze_location(name, info):
             
         clouds = image.get('CLOUDY_PIXEL_PERCENTAGE').getInfo()
         
-        # Download Thumbnail (Fixed)
-        image_file = f"{name}.png" # Changed to PNG for better PDF support
+        # Download Thumbnail (SWITCHED TO JPG FOR STABILITY)
+        image_file = f"{name}.jpg" 
         try:
             # Visualize True Color
-            vis_params = {'min': 0, 'max': 3000, 'bands': ['B4', 'B3', 'B2'], 'dimensions': 600, 'format': 'png'}
+            vis_params = {'min': 0, 'max': 3000, 'bands': ['B4', 'B3', 'B2'], 'dimensions': 600, 'format': 'jpg'}
             thumb_url = image.getThumbURL(vis_params)
             img_data = requests.get(thumb_url).content
             with open(image_file, 'wb') as f:
@@ -117,7 +116,7 @@ def create_and_send_report(results):
         pdf.cell(0, 8, f"Sentiment: {data['sentiment']}", 0, 1)
         pdf.cell(0, 8, f"Status: {data['details']}", 0, 1)
         
-        # IMAGE
+        # IMAGE (JPG Works much better here)
         if data['image'] and os.path.exists(data['image']):
             try:
                 pdf.image(data['image'], x=10, y=pdf.get_y(), w=100)
@@ -131,8 +130,11 @@ def create_and_send_report(results):
         pdf.set_font("Arial", 'B', 11)
         pdf.cell(0, 8, "Recent Intel:", 0, 1)
         pdf.set_font("Arial", size=9)
-        for news in data['news']:
-            pdf.multi_cell(0, 5, news)
+        if data['news']:
+            for news in data['news']:
+                pdf.multi_cell(0, 5, news)
+        else:
+            pdf.cell(0, 8, "No news found.", 0, 1)
             
         pdf.ln(10) # Spacing between stocks
         
@@ -159,7 +161,6 @@ def commit_memory_to_github():
     except Exception as e:
         print(f"⚠️ Brain Sync Failed: {e}")
 
-# --- MAIN EXECUTION ---
 if __name__ == "__main__":
     print("🛰️ Starting Hybrid Scan...")
     scan_results = {}

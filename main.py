@@ -1,285 +1,362 @@
-import ee
 import os
-import requests
 import json
-import yfinance as yf
+import ee
+import smtplib
+import requests
+import urllib.request
+import urllib.parse
+from PIL import Image
+from email.message import EmailMessage
 from datetime import datetime, timedelta
-from fpdf import FPDF
+from google.oauth2.service_account import Credentials
 from GoogleNews import GoogleNews
-from market_memory import update_stock_sentiment
+from fpdf import FPDF
+import yfinance as yf
 
-# --- 1. STRATEGIC TARGETS (With Specific Visualizations) ---
-TARGETS = {
-    "TATASTEEL": {
-        "coords": [86.20, 22.80], 
-        "type": "Jamshedpur", 
-        "ticker": "TATASTEEL.NS",
-        # SWIR: Good for penetrating factory smoke & heat
-        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}
+# ==========================================
+# 1. CONFIGURATION & AUTH
+# ==========================================
+PROJECT_ID = "satellite-tracker-2026"
+EMAIL_USER = os.environ.get("MAIL_USERNAME")
+EMAIL_PASS = os.environ.get("MAIL_PASSWORD")
+
+try:
+    # Handle EE_KEY from Secret (JSON string)
+    if os.environ.get("EE_KEY"):
+        service_account_info = json.loads(os.environ["EE_KEY"])
+        credentials = Credentials.from_service_account_info(
+            service_account_info, 
+            scopes=['https://www.googleapis.com/auth/earthengine']
+        )
+        ee.Initialize(credentials=credentials, project=PROJECT_ID)
+    else:
+        ee.Initialize(project=PROJECT_ID)
+    print("✅ [SYSTEM] Satellite Connection Established")
+except Exception as e:
+    print(f"❌ [CRITICAL] Auth Failed: {e}")
+    # Don't exit, so we can still send Financial/News data if Sat fails
+    pass
+
+googlenews = GoogleNews(period='2d') 
+googlenews.set_lang('en')
+googlenews.set_encode('utf-8')
+
+# ==========================================
+# 2. TARGET LIST (With Smart Band Logic)
+# ==========================================
+# SWIR (B12,B11,B4) = Heat/Smoke/Mines
+# NIR  (B8,B4,B3)   = Water/Vegetation Contrast
+# RGB  (B4,B3,B2)   = Visual/Cars/Containers
+
+targets = {
+    "1. COAL INDIA (Gevra Mine)": { 
+        "roi": [82.5600, 22.3100, 82.6000, 22.3500], 
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, # SWIR for Mines
+        "query": "Coal India production", 
+        "desc": "Pit Expansion (SWIR)",
+        "ticker": "COALINDIA.NS" 
     },
-    "NMDC": {
-        "coords": [81.23, 18.73], 
-        "type": "Bailadila Iron", 
-        "ticker": "NMDC.NS",
-        # SWIR: Highlights bare earth/mining activity
-        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}
+    "2. NMDC (Bailadila Iron)": { 
+        "roi": [81.2000, 18.6600, 81.2400, 18.7000], 
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, # SWIR for Iron Ore
+        "query": "NMDC iron ore prices", 
+        "desc": "Red Ore Piles (SWIR)",
+        "ticker": "NMDC.NS" 
     },
-    "RELIANCE": {
-        "coords": [69.85, 22.36], 
-        "type": "Oil Storage", 
-        "ticker": "RELIANCE.NS",
-        # SWIR: Highlights heat flares and tanks
-        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}
+    "3. RELIANCE (Oil Storage)": { 
+        "roi": [69.8300, 22.3300, 69.9100, 22.3800], 
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, # SWIR for Heat/Tanks
+        "query": "Crude oil inventory India", 
+        "desc": "Tank Farm Levels (SWIR)",
+        "ticker": "RELIANCE.NS" 
     },
-    "ADANIPORTS": {
-        "coords": [69.70, 22.75], 
-        "type": "Mundra Port", 
-        "ticker": "ADANIPORTS.NS",
-        # NIR: Best for Water/Land contrast (Water = Black/Blue)
-        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}
+    "4. TATA STEEL (Jamshedpur)": { 
+        "roi": [86.1950, 22.7950, 86.2050, 22.8050], 
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, # SWIR for Furnace
+        "query": "Tata Steel India production", 
+        "desc": "Blast Furnace Heat",
+        "ticker": "TATASTEEL.NS" 
     },
-    "CONCOR": {
-        "coords": [77.28, 28.53], 
-        "type": "Delhi Depot", 
-        "ticker": "CONCOR.NS",
-        # True Color: To identify containers
-        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}
+    "5. HINDALCO (Copper Dahej)": { 
+        "roi": [72.5300, 21.6900, 72.5600, 21.7200], 
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, 
+        "query": "Copper prices India demand", 
+        "desc": "Smelter Activity",
+        "ticker": "HINDALCO.NS" 
     },
-    "MARUTI": {
-        "coords": [76.93, 28.35], 
-        "type": "Manesar Yard", 
-        "ticker": "MARUTI.NS",
-        # True Color: To see cars
-        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}
+    "6. ULTRATECH (Aditya Cement)": { 
+        "roi": [74.6000, 24.7800, 74.6400, 24.8200], 
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, 
+        "query": "Cement demand India", 
+        "desc": "Quarry Activity",
+        "ticker": "ULTRATECH.NS" 
     },
-    "HINDALCO": {
-        "coords": [72.55, 21.70], 
-        "type": "Copper Dahej", 
-        "ticker": "HINDALCO.NS",
-        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}
+    "7. ADANI PORTS (Mundra)": { 
+        "roi": [69.6900, 22.7300, 69.7300, 22.7600], 
+        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}, # NIR for Water Contrast
+        "query": "Adani Ports cargo volume", 
+        "desc": "Ships at Dock (NIR)",
+        "ticker": "ADANIPORTS.NS" 
     },
-    "ULTRACEMCO": {
-        "coords": [74.63, 24.63], 
-        "type": "Aditya Cement", 
-        "ticker": "ULTRACEMCO.NS",
-        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}
+    "8. CONCOR (Delhi Depot)": { 
+        "roi": [77.2880, 28.5200, 77.2980, 28.5300], 
+        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, # RGB for Containers
+        "query": "Container Corp volume", 
+        "desc": "Container Density",
+        "ticker": "CONCOR.NS" 
     },
-    "JEWAR AIRPORT": {
-        "coords": [77.61, 28.21], 
-        "type": "Construction", 
-        "ticker": None,
-        # NIR: Distinguish cleared earth from vegetation
-        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}
+    "9. MARUTI (Manesar Yard)": { 
+        "roi": [76.9300, 28.3500, 76.9400, 28.3600], 
+        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, # RGB for Cars
+        "query": "Maruti Suzuki sales", 
+        "desc": "Car Inventory",
+        "ticker": "MARUTI.NS" 
     },
-    "BHADLA SOLAR": {
-        "coords": [71.90, 27.50], 
-        "type": "Energy Park", 
-        "ticker": None,
-        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}
+    "10. JEWAR AIRPORT (Const.)": { 
+        "roi": [77.6000, 28.1600, 77.6400, 28.1900], 
+        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}, # NIR for Dirt vs Veg
+        "query": "Jewar Airport status", 
+        "desc": "Construction Progress",
+        "ticker": "GMRINFRA.NS" 
     },
-    "BHAKRA DAM": {
-        "coords": [76.43, 31.41], 
-        "type": "Hydro Level", 
-        "ticker": None,
-        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}
+    "11. BHADLA SOLAR (Energy)": { 
+        "roi": [71.9000, 27.5300, 71.9400, 27.5600], 
+        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}, # NIR for Glass Contrast
+        "query": "India solar capacity", 
+        "desc": "Panel Expansion",
+        "ticker": None 
     },
-    "COALINDIA": {
-        "coords": [82.58, 22.33], 
-        "type": "Gevra Mine", 
-        "ticker": "COALINDIA.NS",
-        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}
+    "12. BHAKRA DAM (Hydro)": { 
+        "roi": [76.4100, 31.3900, 76.4500, 31.4200], 
+        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}, # NIR for Water Level
+        "query": "Monsoon rainfall India", 
+        "desc": "Water Level (NIR)",
+        "ticker": None 
     }
 }
 
-BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-
-# --- AUTHENTICATION ---
-EE_READY = False
-try:
-    import base64
-    service_account = os.environ.get("EE_KEY")
-    if service_account:
-        creds_json = base64.b64decode(service_account).decode('utf-8')
-        creds = ee.ServiceAccountCredentials(None, key_data=creds_json)
-        ee.Initialize(creds)
-        EE_READY = True
-        print("✅ Earth Engine Authenticated")
-    else:
-        ee.Initialize()
-        EE_READY = True
-except Exception as e:
-    print(f"⚠️ Earth Engine Auth Failed: {e}")
-
-# --- 2. SATELLITE IMAGING (SMART BANDS) ---
-def analyze_location(name, info):
-    if not EE_READY: return "NEUTRAL", "Auth Failed", None
-
-    try:
-        # Search for clear images in the last 30 days
-        collection = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-                      .filterBounds(ee.Geometry.Point(info['coords']))
-                      .filterDate(datetime.now() - timedelta(days=30), datetime.now())
-                      .sort('CLOUDY_PIXEL_PERCENTAGE'))
-        
-        image = collection.first()
-        if not image: return "NEUTRAL", "No Recent Data", None
-            
-        clouds = image.get('CLOUDY_PIXEL_PERCENTAGE').getInfo()
-        
-        # --- THE FIX: Use Target-Specific Bands ---
-        vis_config = info.get('vis', {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000})
-        
-        image_file = f"{name.replace(' ', '_')}.jpg"
-        try:
-            vis_params = {
-                'min': vis_config['min'], 
-                'max': vis_config['max'], 
-                'bands': vis_config['bands'], 
-                'dimensions': 800, 
-                'format': 'jpg'
-            }
-            thumb_url = image.getThumbURL(vis_params)
-            img_data = requests.get(thumb_url).content
-            with open(image_file, 'wb') as f:
-                f.write(img_data)
-        except Exception as e:
-            print(f"Image download failed for {name}: {e}")
-            image_file = None
-
-        sentiment = "POSITIVE" if clouds < 20 else "NEUTRAL"
-        status = f"Cloud Cover: {clouds:.1f}%"
-        return sentiment, status, image_file
-
-    except Exception as e:
-        print(f"Error analyzing {name}: {e}")
-        return "NEUTRAL", "Satellite Error", None
-
-# --- 3. FINANCIAL INTELLIGENCE (WITH LINKS) ---
-def get_financial_intel(ticker):
-    data = {"price": "N/A", "pe": "N/A", "signal": "N/A", "news": []}
+# ==========================================
+# 3. HELPER FUNCTIONS
+# ==========================================
+def get_valuation_data(ticker):
+    """Fetches live market data and determines valuation status."""
+    if not ticker:
+        return {"price": "N/A", "pe": "N/A", "change": "N/A", "signal": "N/A", "color": "black"}
     
-    if not ticker: return data 
-
-    # A. Price & PE
     try:
         stock = yf.Ticker(ticker)
-        hist = stock.history(period="1d")
-        if not hist.empty:
-            data["price"] = f"Rs. {hist['Close'].iloc[-1]:.1f}"
-            pe = stock.info.get('trailingPE', 0)
-            data["pe"] = f"{pe:.1f}x"
-            
-            if pe > 0 and pe < 15: data["signal"] = "UNDERVALUED"
-            elif pe > 40: data["signal"] = "OVERVALUED"
-            else: data["signal"] = "NEUTRAL"
-    except: pass
-
-    # B. News (Restored Links)
-    try:
-        googlenews = GoogleNews(period='3d')
-        googlenews.search(ticker.replace(".NS",""))
-        results = googlenews.result()
-        if results:
-            for item in results[:2]:
-                title = item['title'].encode('latin-1', 'ignore').decode('latin-1')
-                date = item.get('date', 'Recent')
-                data["news"].append(f"[{date}] {title}\n [Backup Google Search]")
-    except:
-        data["news"].append("No recent news found.")
+        info = stock.info
+        hist = stock.history(period="1mo")
         
-    return data
+        current_price = info.get('currentPrice', 0)
+        # Fallback if currentPrice is missing
+        if not current_price and not hist.empty:
+            current_price = hist['Close'].iloc[-1]
+            
+        pe_ratio = info.get('trailingPE', 0)
+        
+        # Calculate 1-Month Return
+        if not hist.empty:
+            start_price = hist['Close'].iloc[0]
+            change_pct = ((current_price - start_price) / start_price) * 100
+        else:
+            change_pct = 0
+            
+        # VALUATION LOGIC ENGINE
+        signal = "NEUTRAL"
+        color = "gray"
+        
+        if pe_ratio > 0:
+            if pe_ratio < 15 and change_pct < 10:
+                signal = "VALUE BUY"
+                color = "green"
+            elif pe_ratio > 40:
+                signal = "OVERVALUED"
+                color = "red"
+            elif change_pct > 15:
+                signal = "HEATED (PRICED IN)"
+                color = "orange"
+        
+        return {
+            "price": f"Rs {current_price:.1f}",
+            "pe": f"{pe_ratio:.1f}x",
+            "change": f"{change_pct:+.1f}%",
+            "signal": signal,
+            "color": color
+        }
+    except:
+        return {"price": "Error", "pe": "-", "change": "-", "signal": "Error", "color": "red"}
 
-# --- 4. PDF GENERATOR ---
-class PDFReport(FPDF):
-    def header(self):
-        self.set_font('Arial', 'B', 14)
-        self.cell(0, 10, 'SATELLITE INTELLIGENCE DISPATCH', 0, 1, 'C')
-        self.ln(5)
+def get_satellite_data(coords, vis, filename):
+    try:
+        roi = ee.Geometry.Rectangle(coords)
+        # Look back 30 days dynamically
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=45)
+        
+        col = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+               .filterBounds(roi)
+               .filterDate(start_date, end_date)
+               .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+               .sort('system:time_start', False))
+        
+        if col.size().getInfo() > 0:
+            url = col.first().getThumbURL({
+                'min': vis['min'], 
+                'max': vis['max'], 
+                'bands': vis['bands'], 
+                'region': roi, 
+                'format': 'png', 
+                'dimensions': 600
+            })
+            try:
+                urllib.request.urlretrieve(url, filename)
+                return url, True
+            except: 
+                return url, False
+    except Exception as e:
+        print(f"EE Error: {e}")
+        
+    return None, False
 
-def create_and_send_report(results):
-    pdf = PDFReport()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.add_page()
-    pdf.set_font("Arial", size=10)
+def get_market_news(query):
+    try:
+        googlenews.clear()
+        googlenews.search(query)
+        results = googlenews.result()
+        news_data = []
+        for item in results[:2]:
+            title = item.get('title', '')
+            link = item.get('link', '')
+            date = item.get('date', 'Recent')
+            
+            # Fix relative Google News links
+            if link.startswith("./"): 
+                link = f"https://news.google.com{link[1:]}"
+            
+            # Encode/Decode to fix formatting issues
+            clean_title = title.encode('latin-1', 'ignore').decode('latin-1')
+            
+            if "http" in link: 
+                news_data.append({'title': clean_title, 'link': link, 'date': date})
+                
+        if not news_data:
+            safe_link = f"https://www.google.com/search?q={urllib.parse.quote(query)}&tbm=nws"
+            news_data.append({'title': "No fresh news. Click for Google Search.", 'link': safe_link, 'date': "N/A"})
+        return news_data
+    except:
+        return [{'title': "News fetch failed.", 'link': "#", 'date': "Error"}]
+
+# ==========================================
+# 4. REPORT GENERATION
+# ==========================================
+print("🚀 [SYSTEM] Generating Financial Intelligence Report...")
+
+pdf = FPDF()
+pdf.set_auto_page_break(auto=True, margin=15)
+
+html_report = """
+<html>
+<body style="font-family: Arial, sans-serif; background-color: #f4f6f7; padding: 20px;">
+    <div style="max-width: 900px; margin: 0 auto; background-color: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); overflow: hidden;">
+        <div style="background-color: #2c3e50; padding: 20px; text-align: center; color: white;">
+            <h2 style="margin:0;">SUPPLY CHAIN ALPHA +</h2>
+            <p style="margin:5px; font-size:12px;">Satellite • News • Valuation</p>
+        </div>
+        <table style="width:100%; border-collapse: collapse;">
+"""
+
+for i, (name, data) in enumerate(targets.items()):
+    print(f"   ...Analyzing: {name}")
     
-    pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d')}", 0, 1)
+    # 1. FETCH DATA
+    img_filename = f"sector_{i}.png"
+    img_url, has_image = get_satellite_data(data['roi'], data['vis'], img_filename)
+    news_items = get_market_news(data['query'])
+    val_data = get_valuation_data(data['ticker'])
+    
+    # 2. BUILD HTML ROW
+    news_html = ""
+    for n in news_items:
+        color = "green" if "ago" in str(n['date']) else "gray"
+        news_html += f"<div style='margin-bottom:6px; font-size:11px;'><span style='color:{color}; font-weight:bold;'>[{n['date']}]</span> <a href='{n['link']}' style='text-decoration:none; color:#2980b9;'>{n['title']}</a></div>"
+
+    img_tag = f'<img src="{img_url}" style="width:100%; border-radius:4px;">' if img_url else '<div style="background:#eee; height:150px; display:flex; align-items:center; justify-content:center;">No Image</div>'
+
+    html_report += f"""
+    <tr style="border-bottom: 1px solid #eee;">
+        <td style="width: 35%; padding: 15px; background-color: #fafafa; vertical-align:top;">
+            <div style="font-size:13px; font-weight:800; color:#2c3e50;">{name}</div>
+            <div style="font-size:10px; color:#e67e22; margin-bottom:5px;">Strategy: {data['desc']}</div>
+            {img_tag}
+        </td>
+        <td style="width: 45%; padding: 15px; vertical-align:top; border-right:1px solid #eee;">
+            <div style="font-size:10px; font-weight:bold; color:#7f8c8d; margin-bottom:5px;">INTEL FEED</div>
+            {news_html}
+        </td>
+        <td style="width: 20%; padding: 15px; vertical-align:top; background-color: #fdfdfd;">
+            <div style="font-size:10px; font-weight:bold; color:#7f8c8d; margin-bottom:5px;">MARKET DATA</div>
+            <div style="font-size:16px; font-weight:bold; color:#333;">{val_data['price']}</div>
+            <div style="font-size:11px; color:#555;">P/E: {val_data['pe']}</div>
+            <div style="font-size:11px; color:#555;">1M: {val_data['change']}</div>
+            <div style="margin-top:8px; padding:4px; background-color:{val_data['color']}; color:white; font-size:10px; font-weight:bold; text-align:center; border-radius:3px;">
+                {val_data['signal']}
+            </div>
+        </td>
+    </tr>
+    """
+
+    # 3. BUILD PDF PAGE
+    pdf.add_page()
+    
+    # Title
+    pdf.set_font("Arial", "B", 14)
+    pdf.set_text_color(44, 62, 80)
+    pdf.cell(0, 10, f"{name}", ln=True)
+    
+    # Valuation Bar
+    pdf.set_font("Arial", "B", 10)
+    pdf.set_fill_color(240, 240, 240)
+    pdf.set_text_color(0, 0, 0)
+    pdf.cell(0, 8, f"  Price: {val_data['price']}  |  P/E: {val_data['pe']}  |  Signal: {val_data['signal']}", ln=True, fill=True)
     pdf.ln(5)
     
-    for i, (name, data) in enumerate(results.items(), 1):
-        # 1. Image
-        if data['image'] and os.path.exists(data['image']):
-            pdf.image(data['image'], x=10, y=pdf.get_y(), w=190, h=100)
-            pdf.ln(105) 
-        
-        # 2. Header
-        pdf.set_font("Arial", 'B', 12)
-        pdf.cell(0, 8, f"{i}. {name} ({data['type']})", 0, 1)
-        
-        # 3. Data
-        pdf.set_font("Arial", 'B', 10)
-        fin = data['fin']
-        line = f"Price: {fin['price']} | P/E: {fin['pe']} | Signal: {fin['signal']}"
-        pdf.cell(0, 8, line, 0, 1)
-        
-        # 4. News
-        pdf.set_font("Arial", size=9)
-        if fin['news']:
-            for news in fin['news']:
-                pdf.multi_cell(0, 5, news)
-                pdf.ln(1)
-        
-        # 5. Status
-        pdf.set_text_color(100, 100, 100)
-        pdf.cell(0, 6, f"Sat Status: {data['details']}", 0, 1)
-        pdf.set_text_color(0, 0, 0)
-        
-        pdf.ln(10)
-
-    filename = "Financial_Intel_Report.pdf"
-    pdf.output(filename)
+    # News Links
+    pdf.set_font("Arial", "", 10)
+    pdf.set_text_color(0, 0, 255) # Blue Links
+    for n in news_items:
+        # FPDF link handling
+        pdf.write(5, f"[{n['date']}] {n['title']}", n['link'])
+        pdf.ln(7)
     
-    if BOT_TOKEN and CHAT_ID:
-        with open(filename, 'rb') as f:
-            requests.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument",
-                data={"chat_id": CHAT_ID, "caption": "🛰️ **Alpha Satellite Dispatch**\nSector Scan Complete."},
-                files={"document": f}
-            )
+    pdf.ln(5)
+    # Image
+    if has_image:
+        try:
+            pdf.image(img_filename, x=10, w=190)
+        except:
+            pdf.cell(0, 10, "Image Error", ln=True)
 
-# --- 5. EXECUTION ---
-def commit_memory():
-    try:
-        os.system('git config --global user.email "bot@github.com"')
-        os.system('git config --global user.name "Satellite Bot"')
-        os.system('git add market_memory.json')
-        os.system('git commit -m "Update Intel [Skip CI]"')
-        os.system('git push')
-    except: pass
+# FINALIZE
+html_report += "</table><div style='text-align:center; padding:10px; font-size:10px; color:#aaa;'>Generated by Satellite Bot</div></div></body></html>"
+pdf.output("Financial_Intel_Report.pdf")
+print("✅ Report Generated.")
 
-if __name__ == "__main__":
-    print("🚀 Starting Strategic Scan...")
-    scan_results = {}
-    
-    for name, info in TARGETS.items():
-        print(f"Scanning {name}...")
-        
-        # 1. Satellite
-        sentiment, details, img = analyze_location(name, info)
-        
-        # 2. Financial
-        fin_data = get_financial_intel(info['ticker'])
-        
-        scan_results[name] = {
-            "type": info['type'],
-            "image": img,
-            "sentiment": sentiment,
-            "details": details,
-            "fin": fin_data
-        }
-        
-        if info['ticker']:
-            update_stock_sentiment(info['ticker'].replace(".NS",""), sentiment)
+# SEND EMAIL
+if EMAIL_USER and EMAIL_PASS:
+    print("📧 Sending Dispatch...")
+    msg = EmailMessage()
+    msg['Subject'] = f"Supply Chain Alpha +: {datetime.now().strftime('%d %b')}"
+    msg['From'] = "Satellite Bot"
+    msg['To'] = EMAIL_USER
+    msg.add_alternative(html_report, subtype='html')
 
-    create_and_send_report(scan_results)
-    commit_memory()
+    with open("Financial_Intel_Report.pdf", 'rb') as f:
+        msg.add_attachment(f.read(), maintype='application', subtype='pdf', filename="Financial_Intel_Report.pdf")
+
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+        smtp.login(EMAIL_USER, EMAIL_PASS)
+        smtp.send_message(msg)
+    print("✅ Sent.")
+else:
+    print("⚠️ Email credentials not found. Check generated PDF locally.")

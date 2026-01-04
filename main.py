@@ -131,20 +131,15 @@ targets = {
 # 3. HELPER FUNCTIONS
 # ==========================================
 def get_valuation_data(ticker):
-    """Fetches live market data and determines valuation status."""
     if not ticker:
         return {"price": "N/A", "pe": "N/A", "signal": "N/A"}
-    
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
         hist = stock.history(period="1mo")
-        
         current_price = info.get('currentPrice', 0)
-        # Fallback to history if currentPrice is missing
         if not current_price and not hist.empty:
             current_price = hist['Close'].iloc[-1]
-            
         pe_ratio = info.get('trailingPE', 0)
         
         # Calculate 1-Month Return
@@ -154,7 +149,6 @@ def get_valuation_data(ticker):
         else:
             change_pct = 0
             
-        # VALUATION LOGIC
         signal = "NEUTRAL"
         if pe_ratio > 0:
             if pe_ratio < 15 and change_pct < 10:
@@ -164,18 +158,13 @@ def get_valuation_data(ticker):
             elif change_pct > 15:
                 signal = "HEATED (PRICED IN)"
         
-        return {
-            "price": f"Rs {current_price:.1f}",
-            "pe": f"{pe_ratio:.1f}x",
-            "signal": signal
-        }
+        return {"price": f"Rs {current_price:.1f}", "pe": f"{pe_ratio:.1f}x", "signal": signal}
     except:
         return {"price": "Error", "pe": "-", "signal": "Error"}
 
 def get_satellite_data(coords, vis, filename):
     try:
         roi = ee.Geometry.Rectangle(coords)
-        # Dynamic Date: Look back 30 days
         end_date = datetime.now()
         start_date = end_date - timedelta(days=45)
         
@@ -187,18 +176,15 @@ def get_satellite_data(coords, vis, filename):
         
         if col.size().getInfo() > 0:
             url = col.first().getThumbURL({
-                'min': vis['min'], 
-                'max': vis['max'], 
-                'bands': vis['bands'], 
-                'region': roi, 
-                'format': 'png', 
-                'dimensions': 600
+                'min': vis['min'], 'max': vis['max'], 'bands': vis['bands'], 
+                'region': roi, 'format': 'jpg', 'dimensions': 600
             })
-            try:
-                urllib.request.urlretrieve(url, filename)
+            # Use requests for safer download than urlretrieve
+            r = requests.get(url)
+            if r.status_code == 200:
+                with open(filename, 'wb') as f:
+                    f.write(r.content)
                 return url, True
-            except: 
-                return url, False
     except Exception as e:
         print(f"EE Error: {e}")
     return None, False
@@ -214,11 +200,10 @@ def get_market_news(query):
             link = item.get('link', '')
             date = item.get('date', 'Recent')
             
-            # Fix relative Google News links
             if link.startswith("./"): 
                 link = f"https://news.google.com{link[1:]}"
             
-            # Encode/Decode to fix formatting issues
+            # CRITICAL: Sanitize Title for PDF (Latin-1 Fix)
             clean_title = title.encode('latin-1', 'ignore').decode('latin-1')
             
             if "http" in link: 
@@ -243,7 +228,7 @@ for i, (name, data) in enumerate(targets.items()):
     print(f"   ...Analyzing: {name}")
     
     # 1. FETCH DATA
-    img_filename = f"sector_{i}.png"
+    img_filename = f"sector_{i}.jpg"
     img_url, has_image = get_satellite_data(data['roi'], data['vis'], img_filename)
     news_items = get_market_news(data['query'])
     val_data = get_valuation_data(data['ticker'])
@@ -258,19 +243,18 @@ for i, (name, data) in enumerate(targets.items()):
     
     # Valuation Bar
     pdf.set_font("Arial", "B", 10)
-    pdf.set_fill_color(240, 240, 240) # Light Gray Background
+    pdf.set_fill_color(240, 240, 240)
     pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 8, f"  Price: {val_data['price']}  |  P/E: {val_data['pe']}  |  Signal: {val_data['signal']}", ln=True, fill=True)
     pdf.ln(5)
     
     # News Links (Blue & Clickable)
     pdf.set_font("Arial", "", 10)
-    pdf.set_text_color(0, 0, 255) # Blue Links
+    pdf.set_text_color(0, 0, 255)
     for n in news_items:
-        # Use .write() to handle hyperlinks cleanly in FPDF
         link_text = f"[{n['date']}] {n['title']}"
         pdf.write(5, link_text, n['link'])
-        pdf.ln(7) # Line break
+        pdf.ln(7)
     
     pdf.ln(5)
     # Image
@@ -290,11 +274,14 @@ print("✅ Report Generated.")
 # ==========================================
 if BOT_TOKEN and CHAT_ID:
     print("🚀 Sending to Telegram...")
-    with open(filename, 'rb') as f:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
-        payload = {"chat_id": CHAT_ID, "caption": "🛰️ **Alpha Satellite Dispatch**\nFull Strategic Scan attached."}
-        files = {"document": f}
-        resp = requests.post(url, data=payload, files=files)
-        print(f"✅ Sent: {resp.status_code}")
+    try:
+        with open(filename, 'rb') as f:
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
+            payload = {"chat_id": CHAT_ID, "caption": "🛰️ **Alpha Satellite Dispatch**\nFull Strategic Scan attached."}
+            files = {"document": f}
+            resp = requests.post(url, data=payload, files=files)
+            print(f"✅ Sent: {resp.status_code}")
+    except Exception as e:
+        print(f"❌ Telegram Error: {e}")
 else:
     print("⚠️ Telegram Config Missing. PDF saved locally.")

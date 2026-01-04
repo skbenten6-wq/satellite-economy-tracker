@@ -1,13 +1,12 @@
-name: Technical Sniper
+name: Telegram Commander
 
 on:
-  schedule:
-    - cron: '30 10 * * *' # 10:30 UTC = 4:00 PM IST (Market Close)
-  workflow_dispatch:
+  workflow_dispatch: # Manual start
 
 jobs:
-  chart-hunt:
+  run-commander:
     runs-on: ubuntu-latest
+    timeout-minutes: 350 # Run for nearly 6 hours then stop
 
     steps:
       - name: Checkout Code
@@ -19,12 +18,10 @@ jobs:
           python-version: '3.10'
 
       - name: Install Libraries
-        # We need pandas_ta for the math
-        run: pip install requests yfinance pandas_ta google-generativeai
+        run: pip install requests yfinance pandas_ta google-generativeai python-telegram-bot
 
-      - name: Run Sniper Bot
+      - name: Run Commander
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python sniper_bot.py
+        run: python telegram_commander.py

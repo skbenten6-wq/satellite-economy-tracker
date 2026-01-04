@@ -8,43 +8,86 @@ from fpdf import FPDF
 from GoogleNews import GoogleNews
 from market_memory import update_stock_sentiment
 
-# --- 1. STRATEGIC TARGETS (12 LOCATIONS) ---
+# --- 1. STRATEGIC TARGETS (With Specific Visualizations) ---
 TARGETS = {
-    "COALINDIA": {
-        "coords": [82.58, 22.33], "type": "Gevra Mine", "ticker": "COALINDIA.NS"
+    "TATASTEEL": {
+        "coords": [86.20, 22.80], 
+        "type": "Jamshedpur", 
+        "ticker": "TATASTEEL.NS",
+        # SWIR: Good for penetrating factory smoke & heat
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}
     },
     "NMDC": {
-        "coords": [81.23, 18.73], "type": "Bailadila Iron", "ticker": "NMDC.NS"
+        "coords": [81.23, 18.73], 
+        "type": "Bailadila Iron", 
+        "ticker": "NMDC.NS",
+        # SWIR: Highlights bare earth/mining activity
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}
     },
     "RELIANCE": {
-        "coords": [69.85, 22.36], "type": "Oil Storage", "ticker": "RELIANCE.NS"
-    },
-    "TATASTEEL": {
-        "coords": [86.20, 22.80], "type": "Jamshedpur", "ticker": "TATASTEEL.NS"
-    },
-    "HINDALCO": {
-        "coords": [72.55, 21.70], "type": "Copper Dahej", "ticker": "HINDALCO.NS"
-    },
-    "ULTRACEMCO": {
-        "coords": [74.63, 24.63], "type": "Aditya Cement", "ticker": "ULTRACEMCO.NS"
+        "coords": [69.85, 22.36], 
+        "type": "Oil Storage", 
+        "ticker": "RELIANCE.NS",
+        # SWIR: Highlights heat flares and tanks
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}
     },
     "ADANIPORTS": {
-        "coords": [69.70, 22.75], "type": "Mundra Port", "ticker": "ADANIPORTS.NS"
+        "coords": [69.70, 22.75], 
+        "type": "Mundra Port", 
+        "ticker": "ADANIPORTS.NS",
+        # NIR: Best for Water/Land contrast (Water = Black/Blue)
+        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}
     },
     "CONCOR": {
-        "coords": [77.28, 28.53], "type": "Delhi Depot", "ticker": "CONCOR.NS"
+        "coords": [77.28, 28.53], 
+        "type": "Delhi Depot", 
+        "ticker": "CONCOR.NS",
+        # True Color: To identify containers
+        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}
     },
     "MARUTI": {
-        "coords": [76.93, 28.35], "type": "Manesar Yard", "ticker": "MARUTI.NS"
+        "coords": [76.93, 28.35], 
+        "type": "Manesar Yard", 
+        "ticker": "MARUTI.NS",
+        # True Color: To see cars
+        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}
+    },
+    "HINDALCO": {
+        "coords": [72.55, 21.70], 
+        "type": "Copper Dahej", 
+        "ticker": "HINDALCO.NS",
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}
+    },
+    "ULTRACEMCO": {
+        "coords": [74.63, 24.63], 
+        "type": "Aditya Cement", 
+        "ticker": "ULTRACEMCO.NS",
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}
     },
     "JEWAR AIRPORT": {
-        "coords": [77.61, 28.21], "type": "Construction", "ticker": None
+        "coords": [77.61, 28.21], 
+        "type": "Construction", 
+        "ticker": None,
+        # NIR: Distinguish cleared earth from vegetation
+        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}
     },
     "BHADLA SOLAR": {
-        "coords": [71.90, 27.50], "type": "Energy Park", "ticker": None
+        "coords": [71.90, 27.50], 
+        "type": "Energy Park", 
+        "ticker": None,
+        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}
     },
     "BHAKRA DAM": {
-        "coords": [76.43, 31.41], "type": "Hydro Level", "ticker": None
+        "coords": [76.43, 31.41], 
+        "type": "Hydro Level", 
+        "ticker": None,
+        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}
+    },
+    "COALINDIA": {
+        "coords": [82.58, 22.33], 
+        "type": "Gevra Mine", 
+        "ticker": "COALINDIA.NS",
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}
     }
 }
 
@@ -68,15 +111,15 @@ try:
 except Exception as e:
     print(f"⚠️ Earth Engine Auth Failed: {e}")
 
-# --- 2. SATELLITE IMAGING (RESTORED INFRARED BANDS) ---
+# --- 2. SATELLITE IMAGING (SMART BANDS) ---
 def analyze_location(name, info):
     if not EE_READY: return "NEUTRAL", "Auth Failed", None
 
     try:
-        # Search for clear images in the last 25 days
-        collection = (ee.ImageCollection('COPERNICUS/S2_SR')
+        # Search for clear images in the last 30 days
+        collection = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
                       .filterBounds(ee.Geometry.Point(info['coords']))
-                      .filterDate(datetime.now() - timedelta(days=25), datetime.now())
+                      .filterDate(datetime.now() - timedelta(days=30), datetime.now())
                       .sort('CLOUDY_PIXEL_PERCENTAGE'))
         
         image = collection.first()
@@ -84,18 +127,15 @@ def analyze_location(name, info):
             
         clouds = image.get('CLOUDY_PIXEL_PERCENTAGE').getInfo()
         
-        # --- THE FIX: USE FALSE COLOR INFRARED (B8, B4, B3) ---
-        # B8 = Near Infrared (Highlights Vegetation/Heat) -> Mapped to Red
-        # B4 = Red -> Mapped to Green
-        # B3 = Green -> Mapped to Blue
-        # This creates the high-contrast "Professional" look.
+        # --- THE FIX: Use Target-Specific Bands ---
+        vis_config = info.get('vis', {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000})
         
         image_file = f"{name.replace(' ', '_')}.jpg"
         try:
             vis_params = {
-                'min': 0, 
-                'max': 3000, 
-                'bands': ['B8', 'B4', 'B3'], # <--- RESTORED BANDS
+                'min': vis_config['min'], 
+                'max': vis_config['max'], 
+                'bands': vis_config['bands'], 
                 'dimensions': 800, 
                 'format': 'jpg'
             }
@@ -115,7 +155,7 @@ def analyze_location(name, info):
         print(f"Error analyzing {name}: {e}")
         return "NEUTRAL", "Satellite Error", None
 
-# --- 3. FINANCIAL INTELLIGENCE (RESTORED LINKS) ---
+# --- 3. FINANCIAL INTELLIGENCE (WITH LINKS) ---
 def get_financial_intel(ticker):
     data = {"price": "N/A", "pe": "N/A", "signal": "N/A", "news": []}
     
@@ -144,7 +184,6 @@ def get_financial_intel(ticker):
             for item in results[:2]:
                 title = item['title'].encode('latin-1', 'ignore').decode('latin-1')
                 date = item.get('date', 'Recent')
-                # Restored the [Backup Google Search] text line
                 data["news"].append(f"[{date}] {title}\n [Backup Google Search]")
     except:
         data["news"].append("No recent news found.")

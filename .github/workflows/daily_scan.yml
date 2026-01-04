@@ -24,7 +24,7 @@ jobs:
           python-version: '3.10'
 
       - name: Install Libraries
-        # 👇 I ADDED 'GoogleNews' TO THIS LIST
+        # 👇 ADDED 'GoogleNews' HERE. This fixes the crash.
         run: pip install earthengine-api geemap requests GoogleNews fpdf yfinance
 
       - name: Run Intelligence Script

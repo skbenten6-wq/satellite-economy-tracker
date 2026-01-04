@@ -2,9 +2,13 @@ name: Macro-Micro Link
 
 on:
   schedule:
-    - cron: '30 3 * * *'  # 9:00 AM IST (Pre-Market)
-    - cron: '0 10 * * *'  # 3:30 PM IST (Market Close)
-  workflow_dispatch:      # Allows manual trigger
+    - cron: '30 3 * * *'
+    - cron: '0 10 * * *'
+  workflow_dispatch:
+
+# NEW PERMISSIONS BLOCK
+permissions:
+  contents: write
 
 jobs:
   macro-watch:
@@ -13,6 +17,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GH_PAT }} # Use your PAT for push access
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -20,7 +26,6 @@ jobs:
           python-version: '3.10'
 
       - name: Install Libraries
-        # FIX IS HERE: Added 'GoogleNews' to the list
         run: pip install requests yfinance google-generativeai GoogleNews
 
       - name: Run Macro Bot

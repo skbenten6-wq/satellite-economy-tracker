@@ -8,12 +8,45 @@ from fpdf import FPDF
 from GoogleNews import GoogleNews
 from market_memory import update_stock_sentiment
 
-# --- CONFIGURATION ---
+# --- 1. THE STRATEGIC TARGET LIST (12 LOCATIONS) ---
+# Precise coordinates for Mines, Yards, Ports, and Infrastructure
 TARGETS = {
-    "TATASTEEL": {"coords": [86.18, 22.75], "type": "Mine", "ticker": "TATASTEEL.NS"},
-    "ADANIPORTS": {"coords": [69.70, 22.75], "type": "Port", "ticker": "ADANIPORTS.NS"},
-    "ULTRACEMCO": {"coords": [85.00, 24.50], "type": "Factory", "ticker": "ULTRACEMCO.NS"},
-    "RELIANCE": {"coords": [70.18, 22.40], "type": "Refinery", "ticker": "RELIANCE.NS"}
+    "COALINDIA": {
+        "coords": [82.58, 22.33], "type": "Gevra Mine", "ticker": "COALINDIA.NS"
+    },
+    "NMDC": {
+        "coords": [81.23, 18.73], "type": "Bailadila Iron", "ticker": "NMDC.NS"
+    },
+    "RELIANCE": {
+        "coords": [69.85, 22.36], "type": "Oil Storage", "ticker": "RELIANCE.NS"
+    },
+    "TATASTEEL": {
+        "coords": [86.20, 22.80], "type": "Jamshedpur", "ticker": "TATASTEEL.NS"
+    },
+    "HINDALCO": {
+        "coords": [72.55, 21.70], "type": "Copper Dahej", "ticker": "HINDALCO.NS"
+    },
+    "ULTRACEMCO": {
+        "coords": [74.63, 24.63], "type": "Aditya Cement", "ticker": "ULTRACEMCO.NS"
+    },
+    "ADANIPORTS": {
+        "coords": [69.70, 22.75], "type": "Mundra Port", "ticker": "ADANIPORTS.NS"
+    },
+    "CONCOR": {
+        "coords": [77.28, 28.53], "type": "Delhi Depot", "ticker": "CONCOR.NS"
+    },
+    "MARUTI": {
+        "coords": [76.93, 28.35], "type": "Manesar Yard", "ticker": "MARUTI.NS"
+    },
+    "JEWAR AIRPORT": {
+        "coords": [77.61, 28.21], "type": "Construction", "ticker": None
+    },
+    "BHADLA SOLAR": {
+        "coords": [71.90, 27.50], "type": "Energy Park", "ticker": None
+    },
+    "BHAKRA DAM": {
+        "coords": [76.43, 31.41], "type": "Hydro Level", "ticker": None
+    }
 }
 
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -36,15 +69,15 @@ try:
 except Exception as e:
     print(f"⚠️ Earth Engine Auth Failed: {e}")
 
-# --- 1. SATELLITE ANALYSIS ---
+# --- 2. SATELLITE IMAGING (JPG Mode) ---
 def analyze_location(name, info):
     if not EE_READY: return "NEUTRAL", "Auth Failed", None
 
     try:
-        # Get Sentinel-2 Data
+        # We search a wider date range to ensure we find a non-cloudy image
         collection = (ee.ImageCollection('COPERNICUS/S2_SR')
                       .filterBounds(ee.Geometry.Point(info['coords']))
-                      .filterDate(datetime.now() - timedelta(days=20), datetime.now()) # Expanded range
+                      .filterDate(datetime.now() - timedelta(days=25), datetime.now())
                       .sort('CLOUDY_PIXEL_PERCENTAGE'))
         
         image = collection.first()
@@ -52,15 +85,17 @@ def analyze_location(name, info):
             
         clouds = image.get('CLOUDY_PIXEL_PERCENTAGE').getInfo()
         
-        # Download Thumbnail (JPG)
-        image_file = f"{name}.jpg" 
+        # Download High-Res Thumbnail (JPG format is safer for PDF)
+        image_file = f"{name.replace(' ', '_')}.jpg"
         try:
-            vis_params = {'min': 0, 'max': 3000, 'bands': ['B4', 'B3', 'B2'], 'dimensions': 600, 'format': 'jpg'}
+            # Bands 4,3,2 = True Color (Red, Green, Blue)
+            vis_params = {'min': 0, 'max': 3000, 'bands': ['B4', 'B3', 'B2'], 'dimensions': 800, 'format': 'jpg'}
             thumb_url = image.getThumbURL(vis_params)
             img_data = requests.get(thumb_url).content
             with open(image_file, 'wb') as f:
                 f.write(img_data)
-        except:
+        except Exception as e:
+            print(f"Image download failed for {name}: {e}")
             image_file = None
 
         sentiment = "POSITIVE" if clouds < 20 else "NEUTRAL"
@@ -71,40 +106,46 @@ def analyze_location(name, info):
         print(f"Error analyzing {name}: {e}")
         return "NEUTRAL", "Satellite Error", None
 
-# --- 2. FINANCIAL & NEWS HUNTER ---
+# --- 3. FINANCIAL INTELLIGENCE ---
 def get_financial_intel(ticker):
-    """Fetches Price, PE, and News"""
-    data = {"price": "N/A", "pe": "N/A", "news": []}
+    data = {"price": "N/A", "pe": "N/A", "signal": "N/A", "news": []}
     
-    # A. Market Data
+    if not ticker: return data # Skip for Dams/Airports
+
+    # A. Get Price & PE
     try:
         stock = yf.Ticker(ticker)
         hist = stock.history(period="1d")
         if not hist.empty:
-            data["price"] = f"{hist['Close'].iloc[-1]:.2f}"
-            data["pe"] = f"{stock.info.get('trailingPE', 'N/A')}"
+            data["price"] = f"Rs. {hist['Close'].iloc[-1]:.1f}"
+            data["pe"] = f"{stock.info.get('trailingPE', 0):.1f}x"
+            # Simple PE Signal
+            pe = stock.info.get('trailingPE', 0)
+            if pe > 0 and pe < 15: data["signal"] = "UNDERVALUED"
+            elif pe > 40: data["signal"] = "OVERVALUED"
+            else: data["signal"] = "NEUTRAL"
     except: pass
 
-    # B. News Data
+    # B. Get News
     try:
-        googlenews = GoogleNews(period='2d')
+        googlenews = GoogleNews(period='3d')
         googlenews.search(ticker.replace(".NS",""))
         results = googlenews.result()
         if results:
-            for item in results[:2]: # Top 2 news
+            for item in results[:2]:
                 title = item['title'].encode('latin-1', 'ignore').decode('latin-1')
                 date = item.get('date', 'Recent')
                 data["news"].append(f"[{date}] {title}")
     except:
-        data["news"].append("No recent news.")
+        data["news"].append("No recent news found.")
         
     return data
 
-# --- 3. PDF REPORT GENERATION (Restored Style) ---
+# --- 4. PDF GENERATOR (Original Layout) ---
 class PDFReport(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 14)
-        self.cell(0, 10, 'FINANCIAL INTELLIGENCE DISPATCH', 0, 1, 'C')
+        self.cell(0, 10, 'SATELLITE INTELLIGENCE DISPATCH', 0, 1, 'C')
         self.ln(5)
 
 def create_and_send_report(results):
@@ -116,27 +157,36 @@ def create_and_send_report(results):
     pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d')}", 0, 1)
     pdf.ln(5)
     
-    for i, (target, data) in enumerate(results.items(), 1):
-        # 1. IMAGE (Top)
+    for i, (name, data) in enumerate(results.items(), 1):
+        # 1. Image First (Big & Clear)
         if data['image'] and os.path.exists(data['image']):
-            pdf.image(data['image'], x=10, y=pdf.get_y(), w=190, h=100) # Large Image
-            pdf.ln(105) # Move down past image
+            pdf.image(data['image'], x=10, y=pdf.get_y(), w=190, h=100)
+            pdf.ln(105) # Move cursor down
         
-        # 2. TITLE
+        # 2. Header
         pdf.set_font("Arial", 'B', 12)
-        pdf.cell(0, 8, f"{i}. {target} ({data['type']})", 0, 1)
+        pdf.cell(0, 8, f"{i}. {name} ({data['type']})", 0, 1)
         
-        # 3. FINANCIAL LINE
+        # 3. Financial Data Line
         pdf.set_font("Arial", 'B', 10)
-        pdf.cell(0, 8, f"Price: Rs. {data['fin']['price']} | P/E: {data['fin']['pe']} | Sat Sentiment: {data['sentiment']}", 0, 1)
+        fin = data['fin']
+        line = f"Price: {fin['price']} | P/E: {fin['pe']} | Signal: {fin['signal']}"
+        pdf.cell(0, 8, line, 0, 1)
         
-        # 4. NEWS LIST
+        # 4. News Items
         pdf.set_font("Arial", size=9)
-        if data['fin']['news']:
-            for news_item in data['fin']['news']:
-                pdf.multi_cell(0, 5, f"- {news_item}")
-        pdf.ln(10)
+        if fin['news']:
+            for news in fin['news']:
+                pdf.multi_cell(0, 5, news)
+                pdf.ln(1)
         
+        # 5. Satellite Status
+        pdf.set_text_color(100, 100, 100) # Grey for technical status
+        pdf.cell(0, 6, f"Sat Status: {data['details']}", 0, 1)
+        pdf.set_text_color(0, 0, 0) # Reset color
+        
+        pdf.ln(10) # Space between targets
+
     filename = "Financial_Intel_Report.pdf"
     pdf.output(filename)
     
@@ -144,12 +194,12 @@ def create_and_send_report(results):
         with open(filename, 'rb') as f:
             requests.post(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument",
-                data={"chat_id": CHAT_ID, "caption": "📊 **Financial & Satellite Intel**\nReport Generated."},
+                data={"chat_id": CHAT_ID, "caption": "🛰️ **Alpha Satellite Dispatch**\nSector Scan Complete."},
                 files={"document": f}
             )
 
-# --- 4. MEMORY SYNC ---
-def commit_memory_to_github():
+# --- 5. EXECUTION LOOP ---
+def commit_memory():
     try:
         os.system('git config --global user.email "bot@github.com"')
         os.system('git config --global user.name "Satellite Bot"')
@@ -159,26 +209,28 @@ def commit_memory_to_github():
     except: pass
 
 if __name__ == "__main__":
-    print("🚀 Starting Hybrid Scan...")
+    print("🚀 Starting Strategic Scan...")
     scan_results = {}
     
     for name, info in TARGETS.items():
         print(f"Scanning {name}...")
         
-        # 1. Satellite
+        # 1. Satellite Analysis
         sentiment, details, img = analyze_location(name, info)
         
-        # 2. Financials
+        # 2. Financial Analysis
         fin_data = get_financial_intel(info['ticker'])
         
         scan_results[name] = {
-            "sentiment": sentiment, 
-            "type": info['type'], 
+            "type": info['type'],
             "image": img,
+            "sentiment": sentiment,
+            "details": details,
             "fin": fin_data
         }
         
-        update_stock_sentiment(name, sentiment)
+        if info['ticker']:
+            update_stock_sentiment(info['ticker'].replace(".NS",""), sentiment)
 
     create_and_send_report(scan_results)
-    commit_memory_to_github()
+    commit_memory()

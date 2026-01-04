@@ -1,12 +1,13 @@
-name: Telegram Commander
+name: Technical Sniper
 
 on:
-  workflow_dispatch: # Manual start
+  schedule:
+    - cron: '30 10 * * *' # 4:00 PM IST
+  workflow_dispatch:
 
 jobs:
-  run-commander:
+  chart-hunt:
     runs-on: ubuntu-latest
-    timeout-minutes: 350 # Run for nearly 6 hours then stop
 
     steps:
       - name: Checkout Code
@@ -15,13 +16,16 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.12' # UPGRADED TO 3.12
 
       - name: Install Libraries
-        run: pip install requests yfinance pandas_ta google-generativeai python-telegram-bot
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests yfinance pandas_ta google-generativeai
 
-      - name: Run Commander
+      - name: Run Sniper Bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python telegram_commander.py
+        run: python sniper_bot.py

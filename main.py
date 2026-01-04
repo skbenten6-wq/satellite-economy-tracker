@@ -1,7 +1,7 @@
 import os
 import json
 import ee
-import base64 # <--- ADDED THIS
+import base64
 import requests
 import urllib.request
 import urllib.parse
@@ -12,7 +12,7 @@ from fpdf import FPDF
 import yfinance as yf
 
 # ==========================================
-# 1. CONFIGURATION & AUTH (FIXED)
+# 1. CONFIGURATION & AUTH
 # ==========================================
 PROJECT_ID = "satellite-tracker-2026"
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -20,7 +20,7 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 try:
     if os.environ.get("EE_KEY"):
-        # 👇 DECODE THE BASE64 KEY FIRST
+        # Decode the Base64 Secret
         key_data = base64.b64decode(os.environ.get("EE_KEY")).decode('utf-8')
         service_account_info = json.loads(key_data)
         
@@ -29,12 +29,11 @@ try:
             scopes=['https://www.googleapis.com/auth/earthengine']
         )
         ee.Initialize(credentials=credentials, project=PROJECT_ID)
-        print("✅ [SYSTEM] Satellite Connection Established")
     else:
         ee.Initialize(project=PROJECT_ID)
+    print("✅ [SYSTEM] Satellite Connection Established")
 except Exception as e:
     print(f"❌ [CRITICAL] Auth Failed: {e}")
-    # We continue so we can still send Financials even if Satellite fails
     pass
 
 googlenews = GoogleNews(period='2d') 
@@ -42,92 +41,104 @@ googlenews.set_lang('en')
 googlenews.set_encode('utf-8')
 
 # ==========================================
-# 2. TARGET LIST (Smart Band Logic)
+# 2. STRATEGIC TARGET LIST (With Context & Interpretation)
 # ==========================================
 targets = {
     "1. COAL INDIA (Gevra Mine)": { 
         "roi": [82.5600, 22.3100, 82.6000, 22.3500], 
-        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, # SWIR for Heat/Dust
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000, 'gamma': 1.3}, 
         "query": "Coal India production", 
-        "desc": "Pit Expansion (SWIR)",
-        "ticker": "COALINDIA.NS" 
+        "ticker": "COALINDIA.NS",
+        "location": "📍 Korba District, Chhattisgarh (Asia's Largest Open Cast Mine)",
+        "guide": "🔍 ANALYSIS (SWIR Band): The bright pink/brown patches are active mining cuts exposing fresh earth. Black pools are water reservoirs or coal slurry. Green is surrounding forest."
     },
     "2. NMDC (Bailadila Iron)": { 
         "roi": [81.2000, 18.6600, 81.2400, 18.7000], 
-        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, # SWIR for Red Ore
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000, 'gamma': 1.3}, 
         "query": "NMDC iron ore prices", 
-        "desc": "Red Ore Piles (SWIR)",
-        "ticker": "NMDC.NS" 
+        "ticker": "NMDC.NS",
+        "location": "📍 Dantewada, Chhattisgarh (Iron Ore Range)",
+        "guide": "🔍 ANALYSIS (SWIR Band): High-grade iron ore reflects a distinctive deep orange/red in this band. Look for expansion of these red zones to gauge mining activity."
     },
-    "3. RELIANCE (Oil Storage)": { 
+    "3. RELIANCE (Oil Complex)": { 
         "roi": [69.8300, 22.3300, 69.9100, 22.3800], 
-        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, # SWIR for Tanks
-        "query": "Crude oil inventory India", 
-        "desc": "Tank Farm Levels (SWIR)",
-        "ticker": "RELIANCE.NS" 
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4500, 'gamma': 1.4}, 
+        "query": "Reliance refinery margins", 
+        "ticker": "RELIANCE.NS",
+        "location": "📍 Jamnagar, Gujarat (World's Largest Refinery)",
+        "guide": "🔍 ANALYSIS (SWIR Band): The white geometric circles are crude oil storage tanks. Bright glowing yellow/orange spots indicate active heat flares or high-temperature processing units."
     },
     "4. TATA STEEL (Jamshedpur)": { 
         "roi": [86.1950, 22.7950, 86.2050, 22.8050], 
-        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, # SWIR for Furnace
-        "query": "Tata Steel India production", 
-        "desc": "Blast Furnace Heat",
-        "ticker": "TATASTEEL.NS" 
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000, 'gamma': 1.4}, 
+        "query": "Tata Steel production", 
+        "ticker": "TATASTEEL.NS",
+        "location": "📍 Jamshedpur, Jharkhand (Main Steel Works)",
+        "guide": "🔍 ANALYSIS (SWIR Band): This band penetrates factory smog. Intense orange dots reveal active blast furnaces (1500°C+). Blue/White roofs indicate cold processing sheds."
     },
-    "5. HINDALCO (Copper Dahej)": { 
+    "5. HINDALCO (Copper Unit)": { 
         "roi": [72.5300, 21.6900, 72.5600, 21.7200], 
-        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, 
-        "query": "Copper prices India demand", 
-        "desc": "Smelter Activity",
-        "ticker": "HINDALCO.NS" 
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000, 'gamma': 1.2}, 
+        "query": "Hindalco copper demand", 
+        "ticker": "HINDALCO.NS",
+        "location": "📍 Dahej, Gujarat (Birla Copper Complex)",
+        "guide": "🔍 ANALYSIS (SWIR Band): Large coastal smelter. Dark piles near the docks often indicate copper concentrate imports or slag waste."
     },
-    "6. ULTRATECH (Aditya Cement)": { 
+    "6. ULTRACEMCO (Aditya)": { 
         "roi": [74.6000, 24.7800, 74.6400, 24.8200], 
-        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000}, 
-        "query": "Cement demand India", 
-        "desc": "Quarry Activity",
-        "ticker": "ULTRACEMCO.NS"  # <--- FIXED TICKER
+        "vis": {'bands': ['B12', 'B11', 'B4'], 'min': 0, 'max': 4000, 'gamma': 1.2}, 
+        "query": "Cement prices India", 
+        "ticker": "ULTRACEMCO.NS",
+        "location": "📍 Shambhupura, Rajasthan (Integrated Cement Plant)",
+        "guide": "🔍 ANALYSIS (SWIR Band): Limestone quarries appear extremely bright white/cyan. The pinkish surrounding earth indicates cleared topsoil for expansion."
     },
     "7. ADANI PORTS (Mundra)": { 
         "roi": [69.6900, 22.7300, 69.7300, 22.7600], 
-        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}, # NIR for Water
+        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 2500, 'gamma': 1.5}, 
         "query": "Adani Ports cargo volume", 
-        "desc": "Ships at Dock (NIR)",
-        "ticker": "ADANIPORTS.NS" 
+        "ticker": "ADANIPORTS.NS",
+        "location": "📍 Mundra, Gujarat (India's Largest Private Port)",
+        "guide": "🔍 ANALYSIS (NIR Band): Water appears jet black, creating high contrast with ships (bright white dots) and concrete docks. Bright red indicates mangrove vegetation."
     },
-    "8. CONCOR (Delhi Depot)": { 
+    "8. CONCOR (Delhi ICD)": { 
         "roi": [77.2880, 28.5200, 77.2980, 28.5300], 
-        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, # RGB for Containers
+        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000, 'gamma': 1.3}, 
         "query": "Container Corp volume", 
-        "desc": "Container Density",
-        "ticker": "CONCOR.NS" 
+        "ticker": "CONCOR.NS",
+        "location": "📍 Tughlakabad, New Delhi (Inland Container Depot)",
+        "guide": "🔍 ANALYSIS (True Color): This is a visual view. Look for the density of colorful rectangular blocks (shipping containers) stacked in the yard."
     },
-    "9. MARUTI (Manesar Yard)": { 
+    "9. MARUTI (Manesar)": { 
         "roi": [76.9300, 28.3500, 76.9400, 28.3600], 
-        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000}, # RGB for Cars
+        "vis": {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000, 'gamma': 1.4}, 
         "query": "Maruti Suzuki sales", 
-        "desc": "Car Inventory",
-        "ticker": "MARUTI.NS" 
+        "ticker": "MARUTI.NS",
+        "location": "📍 Manesar, Haryana (Vehicle Stockyard)",
+        "guide": "🔍 ANALYSIS (True Color): Look for the grey parking grids. If they are filled with colors, inventory is high. Empty grey asphalt means low inventory (high sales)."
     },
-    "10. JEWAR AIRPORT (Const.)": { 
+    "10. JEWAR AIRPORT (Site)": { 
         "roi": [77.6000, 28.1600, 77.6400, 28.1900], 
-        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}, # NIR for Dirt
-        "query": "Jewar Airport status", 
-        "desc": "Construction Progress",
-        "ticker": "GMRINFRA.NS" 
+        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000, 'gamma': 1.3}, 
+        "query": "Jewar Airport construction", 
+        "ticker": "GMRINFRA.NS",
+        "location": "📍 Jewar, Uttar Pradesh (Upcoming Int'l Airport)",
+        "guide": "🔍 ANALYSIS (NIR Band): Vegetation is red. The bright white/cyan strip is the bare earth of the runway and terminal construction site."
     },
-    "11. BHADLA SOLAR (Energy)": { 
+    "11. BHADLA SOLAR (Park)": { 
         "roi": [71.9000, 27.5300, 71.9400, 27.5600], 
-        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}, 
-        "query": "India solar capacity", 
-        "desc": "Panel Expansion",
-        "ticker": None 
+        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000, 'gamma': 1.2}, 
+        "query": "India solar power capacity", 
+        "ticker": None,
+        "location": "📍 Bhadla, Rajasthan (World's Largest Solar Park)",
+        "guide": "🔍 ANALYSIS (NIR Band): Solar panels absorb light and appear dark blue/black, contrasting sharply against the bright white/grey desert sand."
     },
-    "12. BHAKRA DAM (Hydro)": { 
+    "12. BHAKRA DAM (Reservoir)": { 
         "roi": [76.4100, 31.3900, 76.4500, 31.4200], 
-        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 3000}, # NIR for Water Level
+        "vis": {'bands': ['B8', 'B4', 'B3'], 'min': 0, 'max': 2500, 'gamma': 1.4}, 
         "query": "Monsoon rainfall India", 
-        "desc": "Water Level (NIR)",
-        "ticker": None 
+        "ticker": None,
+        "location": "📍 Bilaspur, Himachal Pradesh (Gobind Sagar)",
+        "guide": "🔍 ANALYSIS (NIR Band): Deep water is black. Light blue fringes indicate shallow water or drying banks (low water levels). Red is surrounding hill vegetation."
     }
 }
 
@@ -144,7 +155,6 @@ def get_valuation_data(ticker):
         if not current_price and not hist.empty: current_price = hist['Close'].iloc[-1]
         pe_ratio = info.get('trailingPE', 0)
         
-        # Calculate 1-Month Return
         change_pct = 0
         if not hist.empty:
             start_price = hist['Close'].iloc[0]
@@ -154,7 +164,7 @@ def get_valuation_data(ticker):
         if pe_ratio > 0:
             if pe_ratio < 15 and change_pct < 10: signal = "VALUE BUY"
             elif pe_ratio > 40: signal = "OVERVALUED"
-            elif change_pct > 15: signal = "HEATED (PRICED IN)"
+            elif change_pct > 15: signal = "HEATED"
         
         return {"price": f"Rs {current_price:.1f}", "pe": f"{pe_ratio:.1f}x", "signal": signal}
     except: return {"price": "Error", "pe": "-", "signal": "Error"}
@@ -162,20 +172,28 @@ def get_valuation_data(ticker):
 def get_satellite_data(coords, vis, filename):
     try:
         roi = ee.Geometry.Rectangle(coords)
+        # Look back 45 days, strict 15% cloud filter
         end_date = datetime.now()
         start_date = end_date - timedelta(days=45)
         
         col = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
                .filterBounds(roi)
                .filterDate(start_date, end_date)
-               .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+               .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 15))
                .sort('system:time_start', False))
         
         if col.size().getInfo() > 0:
-            url = col.first().getThumbURL({
-                'min': vis['min'], 'max': vis['max'], 'bands': vis['bands'], 
-                'region': roi, 'format': 'jpg', 'dimensions': 600
-            })
+            vis_params = {
+                'min': vis['min'], 
+                'max': vis['max'], 
+                'bands': vis['bands'], 
+                'region': roi, 
+                'format': 'jpg', 
+                'dimensions': 700, # Higher Resolution
+                'gamma': vis.get('gamma', 1.0) # Apply Contrast Boost
+            }
+            url = col.first().getThumbURL(vis_params)
+            
             r = requests.get(url)
             if r.status_code == 200:
                 with open(filename, 'wb') as f:
@@ -192,29 +210,22 @@ def get_market_news(query):
         results = googlenews.result()
         news_data = []
         for item in results[:2]:
-            title = item.get('title', '')
+            clean_title = item.get('title', '').encode('latin-1', 'ignore').decode('latin-1')
             link = item.get('link', '')
-            date = item.get('date', 'Recent')
-            
             if link.startswith("./"): link = f"https://news.google.com{link[1:]}"
-            
-            # CRITICAL FIX: Sanitize Title for PDF to prevent crashes
-            clean_title = title.encode('latin-1', 'ignore').decode('latin-1')
-            
             if "http" in link: 
-                news_data.append({'title': clean_title, 'link': link, 'date': date})
-                
+                news_data.append({'title': clean_title, 'link': link, 'date': item.get('date', 'Recent')})
         if not news_data:
-            safe_link = f"https://www.google.com/search?q={urllib.parse.quote(query)}&tbm=nws"
-            news_data.append({'title': "No fresh news. Click for Google Search.", 'link': safe_link, 'date': "N/A"})
+             safe_link = f"https://www.google.com/search?q={urllib.parse.quote(query)}&tbm=nws"
+             news_data.append({'title': "No fresh news. Click for Search.", 'link': safe_link, 'date': "N/A"})
         return news_data
     except:
         return [{'title': "News fetch failed.", 'link': "#", 'date': "Error"}]
 
 # ==========================================
-# 4. REPORT GENERATION
+# 4. REPORT GENERATION (ENHANCED LAYOUT)
 # ==========================================
-print("🚀 [SYSTEM] Generating Financial Intelligence Report...")
+print("🚀 [SYSTEM] Generating Enhanced Report...")
 
 pdf = FPDF()
 pdf.set_auto_page_break(auto=True, margin=15)
@@ -222,28 +233,32 @@ pdf.set_auto_page_break(auto=True, margin=15)
 for i, (name, data) in enumerate(targets.items()):
     print(f"   ...Analyzing: {name}")
     
-    # 1. FETCH DATA
     img_filename = f"sector_{i}.jpg"
     img_url, has_image = get_satellite_data(data['roi'], data['vis'], img_filename)
     news_items = get_market_news(data['query'])
     val_data = get_valuation_data(data['ticker'])
     
-    # 2. BUILD PDF PAGE
     pdf.add_page()
     
-    # Title
+    # 1. Header (Name)
     pdf.set_font("Arial", "B", 14)
     pdf.set_text_color(44, 62, 80)
     pdf.cell(0, 10, f"{name}", ln=True)
     
-    # Valuation Bar
+    # 2. Location Context (New)
+    pdf.set_font("Arial", "I", 10)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 6, f"{data['location']}", ln=True)
+    pdf.ln(2)
+
+    # 3. Valuation Bar
     pdf.set_font("Arial", "B", 10)
     pdf.set_fill_color(240, 240, 240)
     pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 8, f"  Price: {val_data['price']}  |  P/E: {val_data['pe']}  |  Signal: {val_data['signal']}", ln=True, fill=True)
     pdf.ln(5)
     
-    # News Links (Blue & Clickable)
+    # 4. News Links
     pdf.set_font("Arial", "", 10)
     pdf.set_text_color(0, 0, 255)
     for n in news_items:
@@ -252,31 +267,35 @@ for i, (name, data) in enumerate(targets.items()):
         pdf.ln(7)
     
     pdf.ln(5)
-    # Image
+    
+    # 5. Image & Analyst Guide
     if has_image:
         try:
             pdf.image(img_filename, x=10, w=190)
+            pdf.ln(5)
+            
+            # The Analyst Legend
+            pdf.set_font("Arial", "B", 9)
+            pdf.set_text_color(50, 50, 50)
+            pdf.multi_cell(0, 5, f"{data['guide']}")
+            
         except:
             pdf.cell(0, 10, "Image Error", ln=True)
 
-# FINALIZE PDF
+# Finalize
 filename = "Financial_Intel_Report.pdf"
 pdf.output(filename)
 print("✅ Report Generated.")
 
-# ==========================================
-# 5. TELEGRAM DELIVERY
-# ==========================================
+# Telegram Send
 if BOT_TOKEN and CHAT_ID:
     print("🚀 Sending to Telegram...")
     try:
         with open(filename, 'rb') as f:
             url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
-            payload = {"chat_id": CHAT_ID, "caption": "🛰️ **Alpha Satellite Dispatch**\nFull Strategic Scan attached."}
+            payload = {"chat_id": CHAT_ID, "caption": "🛰️ **Strategic Satellite Dispatch**\nFull Imagery & Analyst Guides Included."}
             files = {"document": f}
-            resp = requests.post(url, data=payload, files=files)
-            print(f"✅ Sent: {resp.status_code}")
+            requests.post(url, data=payload, files=files)
+            print("✅ Sent.")
     except Exception as e:
         print(f"❌ Telegram Error: {e}")
-else:
-    print("⚠️ Telegram Config Missing. PDF saved locally.")

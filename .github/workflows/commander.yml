@@ -3,7 +3,7 @@ name: Telegram Commander (Listener)
 on:
   schedule:
     - cron: '0 */6 * * *' # Restart every 6 hours
-  workflow_dispatch:      # Manual trigger
+  workflow_dispatch:
 
 jobs:
   listen-for-commands:
@@ -17,7 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.12' # UPGRADED TO 3.12 (Fixes pandas_ta error)
+          python-version: '3.12'
 
       - name: Install Libraries
         run: |
@@ -28,4 +28,8 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # NEW KEYS FOR REMOTE CONTROL
+          GH_PAT: ${{ secrets.GH_PAT }}
+          REPO_OWNER: ${{ secrets.REPO_OWNER }}
+          REPO_NAME: ${{ secrets.REPO_NAME }}
         run: python telegram_commander.py
